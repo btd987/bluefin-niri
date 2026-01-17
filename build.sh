@@ -47,7 +47,16 @@ dnf5 install -y \
     kitty \
     kanshi \
     gamescope \
-    khal
+    khal \
+    thinkfan
+
+# Install asusctl for NVIDIA variant (ASUS ROG/TUF laptop support)
+if [[ "${VARIANT}" == *"nvidia"* ]]; then
+    echo "Installing asusctl for ASUS laptop support..."
+    copr_install_isolated ublue-os/asusd \
+        asusctl \
+        rog-control-center
+fi
 
 # Set zsh as default shell for new users
 sed -i 's|SHELL=/bin/bash|SHELL=/bin/zsh|' /etc/default/useradd

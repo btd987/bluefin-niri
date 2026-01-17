@@ -101,6 +101,7 @@ jobs:
           build-args: |
             BASE_IMAGE=ghcr.io/ublue-os/${{ matrix.base_image }}
             TAG=${{ steps.channel.outputs.channel }}
+            VARIANT=${{ matrix.image_name }}
           labels: |
             org.opencontainers.image.version=${{ steps.tags.outputs.custom_version }}
           oci: true
