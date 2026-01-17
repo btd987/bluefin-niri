@@ -51,8 +51,8 @@ jobs:
               CHANNEL="stable-daily"
             fi
           else
-            # Push events use stable
-            CHANNEL="stable"
+            # Push events use stable-daily
+            CHANNEL="stable-daily"
           fi
           echo "channel=${CHANNEL}" >> $GITHUB_OUTPUT
 
@@ -106,7 +106,7 @@ jobs:
           oci: true
 
       - name: Login to GHCR
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         uses: redhat-actions/podman-login@v1
         with:
           registry: ghcr.io
@@ -114,7 +114,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push to GHCR
-        if: github.event_name != 'pull_request'
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         uses: redhat-actions/push-to-registry@v2
         with:
           image: ${{ steps.build.outputs.image }}
