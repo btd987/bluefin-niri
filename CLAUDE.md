@@ -45,6 +45,6 @@ podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bluefin-dx-nvidia-open --bu
 - `yalter/niri` - Niri compositor, xwayland-satellite
 - `avengemedia/danklinux` - Quickshell, matugen, danksearch
 - `avengemedia/dms` - DankMaterialShell
-- `ublue-os/asusd` - asusctl, rog-control-center (NVIDIA variant only)
+- `lukenukem/asus-linux` - asusctl, rog-control-center (NVIDIA variant only)
 
 The `copr_install_isolated()` helper in build.sh enables a COPR, immediately disables it, then installs with the repo explicitly enabled - this prevents COPR repos from affecting future dnf operations.
