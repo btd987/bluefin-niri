@@ -61,12 +61,12 @@ fi
 # Set zsh as default shell for new users
 sed -i 's|SHELL=/bin/bash|SHELL=/bin/zsh|' /etc/default/useradd
 
-# Enable DMS and kanshi services for new users via systemd
-mkdir -p /etc/skel/.config/systemd/user/graphical-session.target.wants
-ln -sf /usr/lib/systemd/user/dms.service \
-    /etc/skel/.config/systemd/user/graphical-session.target.wants/dms.service
-ln -sf /usr/lib/systemd/user/kanshi.service \
-    /etc/skel/.config/systemd/user/graphical-session.target.wants/kanshi.service
+# Enable DMS and kanshi services by default for all users via systemd preset
+mkdir -p /usr/lib/systemd/user-preset
+cat > /usr/lib/systemd/user-preset/80-bluefin-niri.preset << 'EOF'
+enable dms.service
+enable kanshi.service
+EOF
 
 # Portal configuration for Niri
 # Uses GNOME portal (works well with Niri) + GTK fallback
@@ -74,6 +74,14 @@ mkdir -p /usr/share/xdg-desktop-portal
 cat > /usr/share/xdg-desktop-portal/niri-portals.conf << 'EOF'
 [preferred]
 default=gnome;gtk
+EOF
+
+# Set Niri as default session for new users via AccountsService template
+mkdir -p /usr/share/accountsservice/user-templates
+cat > /usr/share/accountsservice/user-templates/standard << 'EOF'
+[User]
+Session=niri
+SystemAccount=false
 EOF
 
 echo "Niri + DMS installation complete"
