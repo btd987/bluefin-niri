@@ -53,7 +53,7 @@ dnf5 install -y \
 # Install asusctl for NVIDIA variant (ASUS ROG/TUF laptop support)
 if [[ "${VARIANT}" == *"nvidia"* ]]; then
     echo "Installing asusctl for ASUS laptop support..."
-    copr_install_isolated ublue-os/asusd \
+    copr_install_isolated lukenukem/asus-linux \
         asusctl \
         rog-control-center
 fi
