@@ -35,12 +35,30 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Generate tags
+      - name: Get base image version
+        id: base_version
+        run: |
+          BASE_IMAGE="ghcr.io/ublue-os/${{ matrix.base_image }}:stable"
+          VERSION=$(skopeo inspect docker://${BASE_IMAGE} | jq -r '.Labels["org.opencontainers.image.version"]')
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Generate tags and version
         id: tags
         run: |
           DATE=$(date +%Y%m%d)
           echo "date_tag=stable-${DATE}" >> $GITHUB_OUTPUT
           echo "stable_tag=stable" >> $GITHUB_OUTPUT
+
+          # Determine variant suffix
+          if [[ "${{ matrix.image_name }}" == *"-nvidia"* ]]; then
+            SUFFIX="niri-nvidia"
+          else
+            SUFFIX="niri"
+          fi
+
+          # Compose version: base_version.suffix.date
+          CUSTOM_VERSION="${{ steps.base_version.outputs.version }}.${SUFFIX}.${DATE}"
+          echo "custom_version=${CUSTOM_VERSION}" >> $GITHUB_OUTPUT
 
       - name: Build image
         id: build
@@ -54,6 +72,8 @@ jobs:
           build-args: |
             BASE_IMAGE=ghcr.io/ublue-os/${{ matrix.base_image }}
             TAG=stable
+          labels: |
+            org.opencontainers.image.version=${{ steps.tags.outputs.custom_version }}
           oci: true
 
       - name: Login to GHCR
