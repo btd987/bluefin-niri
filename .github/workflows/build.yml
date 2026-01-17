@@ -1,14 +1,24 @@
-name: Build Stable
+name: Build
 
 on:
   schedule:
-    - cron: "0 8 * * TUE"  # Weekly on Tuesdays at 8:00 UTC
+    - cron: "0 5 * * TUE"  # Weekly stable (after upstream 1:00 UTC)
+    - cron: "0 12 * * *"   # Daily stable-daily (midday to catch upstream updates)
   push:
     branches:
       - main
     paths-ignore:
       - "**.md"
   workflow_dispatch:
+    inputs:
+      channel:
+        description: "Build channel"
+        required: true
+        default: "stable"
+        type: choice
+        options:
+          - stable
+          - stable-daily
 
 env:
   IMAGE_REGISTRY: ghcr.io/${{ github.repository_owner }}
@@ -29,6 +39,23 @@ jobs:
             image_name: bluefin-niri-nvidia
 
     steps:
+      - name: Determine channel
+        id: channel
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            CHANNEL="${{ inputs.channel }}"
+          elif [[ "${{ github.event_name }}" == "schedule" ]]; then
+            if [[ "${{ github.event.schedule }}" == "0 5 * * TUE" ]]; then
+              CHANNEL="stable"
+            else
+              CHANNEL="stable-daily"
+            fi
+          else
+            # Push events use stable
+            CHANNEL="stable"
+          fi
+          echo "channel=${CHANNEL}" >> $GITHUB_OUTPUT
+
       - name: Maximize build space
         uses: ublue-os/remove-unwanted-software@v9
 
@@ -38,7 +65,7 @@ jobs:
       - name: Get base image version
         id: base_version
         run: |
-          BASE_IMAGE="ghcr.io/ublue-os/${{ matrix.base_image }}:stable"
+          BASE_IMAGE="ghcr.io/ublue-os/${{ matrix.base_image }}:${{ steps.channel.outputs.channel }}"
           VERSION=$(skopeo inspect docker://${BASE_IMAGE} | jq -r '.Labels["org.opencontainers.image.version"]')
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
@@ -46,8 +73,10 @@ jobs:
         id: tags
         run: |
           DATE=$(date +%Y%m%d)
-          echo "date_tag=stable-${DATE}" >> $GITHUB_OUTPUT
-          echo "stable_tag=stable" >> $GITHUB_OUTPUT
+          CHANNEL="${{ steps.channel.outputs.channel }}"
+
+          echo "channel_tag=${CHANNEL}" >> $GITHUB_OUTPUT
+          echo "date_tag=${CHANNEL}-${DATE}" >> $GITHUB_OUTPUT
 
           # Determine variant suffix
           if [[ "${{ matrix.image_name }}" == *"-nvidia"* ]]; then
@@ -67,11 +96,11 @@ jobs:
           containerfiles: ./Containerfile
           image: ${{ matrix.image_name }}
           tags: |
-            ${{ steps.tags.outputs.stable_tag }}
+            ${{ steps.tags.outputs.channel_tag }}
             ${{ steps.tags.outputs.date_tag }}
           build-args: |
             BASE_IMAGE=ghcr.io/ublue-os/${{ matrix.base_image }}
-            TAG=stable
+            TAG=${{ steps.channel.outputs.channel }}
           labels: |
             org.opencontainers.image.version=${{ steps.tags.outputs.custom_version }}
           oci: true
