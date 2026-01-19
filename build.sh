@@ -48,7 +48,9 @@ dnf5 install -y \
     kanshi \
     gamescope \
     khal \
-    thinkfan
+    thinkfan \
+    snapper \
+    btrfs-assistant
 
 # Install asusctl for NVIDIA variant (ASUS ROG/TUF laptop support)
 if [[ "${VARIANT}" == *"nvidia"* ]]; then
@@ -57,6 +59,10 @@ if [[ "${VARIANT}" == *"nvidia"* ]]; then
         asusctl \
         rog-control-center
 fi
+
+# Enable snapper automatic snapshot timers
+systemctl enable snapper-timeline.timer
+systemctl enable snapper-cleanup.timer
 
 # Set zsh as default shell for new users
 sed -i 's|SHELL=/bin/bash|SHELL=/bin/zsh|' /etc/default/useradd
