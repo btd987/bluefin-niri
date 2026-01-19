@@ -35,7 +35,7 @@ podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bluefin-dx-nvidia-open --bu
 
 **System files:**
 - `system_files/etc/modprobe.d/thinkfan.conf` - Enables thinkpad_acpi fan control
-- `system_files/usr/share/ublue-os/just/60-niri.just` - ujust recipes for Niri
+- `system_files/usr/share/ublue-os/just/60-custom.just` - ujust recipes for Niri
 
 **Variant-specific packages (VARIANT build arg):**
 - Base (all): thinkfan (ThinkPad fan control)
