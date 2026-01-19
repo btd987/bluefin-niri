@@ -81,11 +81,7 @@ configure-snapshots-dev:
     done
     # Override timer to run every 15 minutes
     mkdir -p /etc/systemd/system/snapper-timeline.timer.d
-    cat > /etc/systemd/system/snapper-timeline.timer.d/dev-machine.conf << 'TIMEREOF'
-[Timer]
-OnCalendar=
-OnCalendar=*:0/15
-TIMEREOF
+    printf '%s\n' '[Timer]' 'OnCalendar=' 'OnCalendar=*:0/15' > /etc/systemd/system/snapper-timeline.timer.d/dev-machine.conf
     systemctl daemon-reload
     systemctl restart snapper-timeline.timer
     echo ""
