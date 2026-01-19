@@ -55,3 +55,39 @@ snapshot desc="manual":
 [group('System')]
 btrfs-assistant:
     @btrfs-assistant
+
+# Configure snapshots for dev machine (15-minute intervals)
+[group('System')]
+configure-snapshots-dev:
+    #!/usr/bin/bash
+    set -euo pipefail
+    if [[ $EUID -ne 0 ]]; then
+        echo "Run with sudo: sudo ujust configure-snapshots-dev"
+        exit 1
+    fi
+    echo "Configuring snapshots for dev machine (15-minute intervals)..."
+    # Configure retention: 24 timeline (6hrs), 7 daily, 4 weekly
+    for config in var home; do
+        if [[ -f "/etc/snapper/configs/$config" ]]; then
+            sed -i 's/^TIMELINE_LIMIT_HOURLY=.*/TIMELINE_LIMIT_HOURLY="24"/' "/etc/snapper/configs/$config"
+            sed -i 's/^TIMELINE_LIMIT_DAILY=.*/TIMELINE_LIMIT_DAILY="7"/' "/etc/snapper/configs/$config"
+            sed -i 's/^TIMELINE_LIMIT_WEEKLY=.*/TIMELINE_LIMIT_WEEKLY="4"/' "/etc/snapper/configs/$config"
+            sed -i 's/^TIMELINE_LIMIT_MONTHLY=.*/TIMELINE_LIMIT_MONTHLY="0"/' "/etc/snapper/configs/$config"
+            sed -i 's/^TIMELINE_LIMIT_YEARLY=.*/TIMELINE_LIMIT_YEARLY="0"/' "/etc/snapper/configs/$config"
+            echo "Configured $config: 24 timeline, 7 daily, 4 weekly"
+        else
+            echo "Config $config not found - run 'sudo ujust setup-snapshots' first"
+        fi
+    done
+    # Override timer to run every 15 minutes
+    mkdir -p /etc/systemd/system/snapper-timeline.timer.d
+    cat > /etc/systemd/system/snapper-timeline.timer.d/dev-machine.conf << 'TIMEREOF'
+[Timer]
+OnCalendar=
+OnCalendar=*:0/15
+TIMEREOF
+    systemctl daemon-reload
+    systemctl restart snapper-timeline.timer
+    echo ""
+    echo "Done! Snapshots will run every 15 minutes."
+    echo "Retention: 24 timeline (~6hrs), 7 daily, 4 weekly"
