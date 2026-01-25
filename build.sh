@@ -50,7 +50,9 @@ dnf5 install -y \
     khal \
     thinkfan \
     snapper \
-    btrfs-assistant
+    btrfs-assistant \
+    grim \
+    slurp
 
 # Install asusctl for NVIDIA variant (ASUS ROG/TUF laptop support)
 if [[ "${VARIANT}" == *"nvidia"* ]]; then
