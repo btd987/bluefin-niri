@@ -17,11 +17,63 @@ jobs:
           - bluefin-niri-nvidia
 
     steps:
-      - name: Delete old package versions
-        uses: actions/delete-package-versions@v5
+      - name: Cleanup old package versions
+        uses: actions/github-script@v7
         with:
-          package-name: ${{ matrix.package }}
-          package-type: container
-          min-versions-to-keep: 5
-          delete-only-untagged-versions: false
-          ignore-versions: "^(stable|stable-daily)$"
+          script: |
+            const package_name = '${{ matrix.package }}';
+            const owner = context.repo.owner;
+
+            // Get all versions
+            const versions = await github.paginate(
+              github.rest.packages.getAllPackageVersionsForPackageOwnedByUser,
+              { package_type: 'container', package_name, username: owner }
+            );
+
+            // Categorize versions by tag pattern
+            const rolling = [];      // stable, stable-daily (never delete)
+            const stableDated = [];  // stable-YYYYMMDD
+            const dailyDated = [];   // stable-daily-YYYYMMDD
+            const other = [];        // untagged or other
+
+            for (const v of versions) {
+              const tags = v.metadata?.container?.tags || [];
+              if (tags.includes('stable') || tags.includes('stable-daily')) {
+                rolling.push(v);
+              } else if (tags.some(t => /^stable-\d{8}$/.test(t))) {
+                stableDated.push(v);
+              } else if (tags.some(t => /^stable-daily-\d{8}$/.test(t))) {
+                dailyDated.push(v);
+              } else {
+                other.push(v);
+              }
+            }
+
+            // Sort by created_at descending and determine what to delete
+            const sortByDate = (a, b) => new Date(b.created_at) - new Date(a.created_at);
+            stableDated.sort(sortByDate);
+            dailyDated.sort(sortByDate);
+
+            const toDelete = [
+              ...stableDated.slice(5),   // Keep last 5 stable-YYYYMMDD
+              ...dailyDated.slice(7),    // Keep last 7 stable-daily-YYYYMMDD
+              ...other                   // Delete all untagged/other
+            ];
+
+            console.log(`Package: ${package_name}`);
+            console.log(`Rolling tags (keep all): ${rolling.length}`);
+            console.log(`Stable dated (keep 5): ${stableDated.length}`);
+            console.log(`Daily dated (keep 7): ${dailyDated.length}`);
+            console.log(`Other/untagged: ${other.length}`);
+            console.log(`To delete: ${toDelete.length}`);
+
+            for (const v of toDelete) {
+              const tags = v.metadata?.container?.tags || [];
+              console.log(`Deleting version ${v.id} (tags: ${tags.join(', ') || 'untagged'})`);
+              await github.rest.packages.deletePackageVersionForUser({
+                package_type: 'container',
+                package_name,
+                username: owner,
+                package_version_id: v.id
+              });
+            }
