@@ -92,4 +92,29 @@ Session=niri
 SystemAccount=false
 EOF
 
+# Customize os-release to identify this build
+OS_RELEASE="/usr/lib/os-release"
+BUILD_DATE=$(date -u +%Y%m%dT%H%M%SZ)
+
+if [[ "${VARIANT}" == *"nvidia"* ]]; then
+    NIRI_VARIANT="Niri NVIDIA"
+    NIRI_VARIANT_ID="niri-nvidia"
+else
+    NIRI_VARIANT="Niri"
+    NIRI_VARIANT_ID="niri"
+fi
+
+# Append Niri to PRETTY_NAME (e.g., "Bluefin-dx 42" -> "Bluefin-dx 42 Niri")
+sed -i "s/^PRETTY_NAME=\"\(.*\)\"/PRETTY_NAME=\"\1 ${NIRI_VARIANT}\"/" "$OS_RELEASE"
+
+# Set variant fields
+sed -i "/^VARIANT=/d" "$OS_RELEASE"
+sed -i "/^VARIANT_ID=/d" "$OS_RELEASE"
+echo "VARIANT=\"${NIRI_VARIANT}\"" >> "$OS_RELEASE"
+echo "VARIANT_ID=\"${NIRI_VARIANT_ID}\"" >> "$OS_RELEASE"
+
+# Add build timestamp
+sed -i "/^BUILD_ID=/d" "$OS_RELEASE"
+echo "BUILD_ID=\"${BUILD_DATE}\"" >> "$OS_RELEASE"
+
 echo "Niri + DMS installation complete"
