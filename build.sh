@@ -52,7 +52,21 @@ dnf5 install -y \
     snapper \
     btrfs-assistant \
     grim \
-    slurp
+    slurp \
+    libvirt-daemon-kvm \
+    qemu-kvm \
+    virt-manager \
+    virt-install \
+    virt-viewer \
+    swtpm \
+    swtpm-tools \
+    edk2-ovmf \
+    guestfs-tools \
+    libvirt-nss \
+    libvirt-daemon-config-network \
+    virt-top \
+    spice-gtk-tools \
+    libguestfs-tools-c
 
 # Install asusctl for NVIDIA variant (ASUS ROG/TUF laptop support)
 if [[ "${VARIANT}" == *"nvidia"* ]]; then
@@ -65,6 +79,20 @@ fi
 # Enable snapper automatic snapshot timers
 systemctl enable snapper-timeline.timer
 systemctl enable snapper-cleanup.timer
+
+# Enable libvirtd for VM support
+systemctl enable libvirtd.service
+
+# Polkit rule: allow libvirt group to manage VMs without password
+mkdir -p /etc/polkit-1/rules.d
+cat > /etc/polkit-1/rules.d/50-libvirt.rules << 'EOF'
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.libvirt.unix.manage" &&
+        subject.isInGroup("libvirt")) {
+        return polkit.Result.YES;
+    }
+});
+EOF
 
 # Set zsh as default shell for new users
 sed -i 's|SHELL=/bin/bash|SHELL=/bin/zsh|' /etc/default/useradd
