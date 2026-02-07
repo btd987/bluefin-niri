@@ -66,7 +66,8 @@ dnf5 install -y \
     libvirt-daemon-config-network \
     virt-top \
     spice-gtk-tools \
-    libguestfs-tools-c
+    libguestfs-tools-c \
+    partclone
 
 # Install asusctl for NVIDIA variant (ASUS ROG/TUF laptop support)
 if [[ "${VARIANT}" == *"nvidia"* ]]; then
