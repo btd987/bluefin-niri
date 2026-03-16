@@ -38,8 +38,12 @@ podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bluefin-dx-nvidia-open --bu
 - `system_files/usr/share/ublue-os/just/60-custom.just` - ujust recipes for Niri
 
 **Variant-specific packages (VARIANT build arg):**
-- Base (all): thinkfan (ThinkPad fan control)
+- Base (all): thinkfan, Mullvad VPN + Browser, Proton VPN (CLI + GUI), libappindicator-gtk3
 - NVIDIA only: asusctl, rog-control-center (ASUS ROG/TUF laptop support)
+
+**External repos:**
+- `repository.mullvad.net` - Mullvad VPN, Mullvad Browser
+- `repo.protonvpn.com` - Proton VPN GUI (proton-vpn-gnome-desktop), Proton VPN CLI (proton-vpn-cli)
 
 **COPR sources:**
 - `yalter/niri` - Niri compositor, xwayland-satellite

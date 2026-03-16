@@ -42,6 +42,27 @@ copr_install_isolated avengemedia/danklinux \
 copr_install_isolated avengemedia/dms \
     dms
 
+# Install Mullvad VPN + Browser from Mullvad repo (isolated)
+dnf5 config-manager addrepo --from-repofile=https://repository.mullvad.net/rpm/stable/mullvad.repo
+dnf5 install -y \
+    mullvad-vpn \
+    mullvad-browser
+dnf5 config-manager setopt mullvad-stable.enabled=0
+
+# Install Proton VPN (CLI + GUI) from Proton repo (isolated)
+cat > /etc/yum.repos.d/protonvpn-stable.repo << 'EOF'
+[protonvpn-fedora-stable]
+name=ProtonVPN Fedora Stable
+baseurl=https://repo.protonvpn.com/fedora-$releasever-stable/stable/
+enabled=1
+gpgcheck=1
+gpgkey=https://repo.protonvpn.com/fedora-$releasever-stable/public_key.asc
+EOF
+dnf5 install -y \
+    proton-vpn-gnome-desktop \
+    proton-vpn-cli
+dnf5 config-manager setopt protonvpn-fedora-stable.enabled=0
+
 # Install additional packages from Fedora repos
 dnf5 install -y \
     kitty \
@@ -67,7 +88,8 @@ dnf5 install -y \
     virt-top \
     spice-gtk-tools \
     libguestfs-tools-c \
-    partclone
+    partclone \
+    libappindicator-gtk3
 
 # Install asusctl for NVIDIA variant (ASUS ROG/TUF laptop support)
 if [[ "${VARIANT}" == *"nvidia"* ]]; then
@@ -83,6 +105,9 @@ systemctl enable snapper-cleanup.timer
 
 # Enable libvirtd for VM support
 systemctl enable libvirtd.service
+
+# Enable Mullvad VPN daemon
+systemctl enable mullvad-daemon.service
 
 # Polkit rule: allow libvirt group to manage VMs without password
 mkdir -p /etc/polkit-1/rules.d
