@@ -67,7 +67,9 @@ enabled=1
 gpgcheck=1
 gpgkey=https://repo.protonvpn.com/fedora-$releasever-stable/public_key.asc
 EOF
-dnf5 install -y \
+# noscripts: proton-vpn-daemon %posttrans tries to contact systemd over D-Bus,
+# which isn't available during container builds
+dnf5 install -y --setopt=tsflags=noscripts \
     proton-vpn-gnome-desktop \
     proton-vpn-cli
 dnf5 config-manager setopt protonvpn-fedora-stable.enabled=0
