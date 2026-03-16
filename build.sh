@@ -62,7 +62,7 @@ dnf5 config-manager setopt mullvad-stable.enabled=0
 cat > /etc/yum.repos.d/protonvpn-stable.repo << 'EOF'
 [protonvpn-fedora-stable]
 name=ProtonVPN Fedora Stable
-baseurl=https://repo.protonvpn.com/fedora-$releasever-stable/stable/
+baseurl=https://repo.protonvpn.com/fedora-$releasever-stable/
 enabled=1
 gpgcheck=1
 gpgkey=https://repo.protonvpn.com/fedora-$releasever-stable/public_key.asc
