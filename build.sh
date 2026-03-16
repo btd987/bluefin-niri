@@ -42,6 +42,15 @@ copr_install_isolated avengemedia/danklinux \
 copr_install_isolated avengemedia/dms \
     dms
 
+# Fedora Atomic symlinks /opt -> /var/opt, which breaks RPMs that install to /opt
+# (cpio mkdir fails because the symlink exists). Replace with a real directory.
+if [[ -L /opt ]]; then
+    rm /opt
+    mkdir -p /opt
+    # Migrate any existing content from /var/opt
+    cp -a /var/opt/. /opt/ 2>/dev/null || true
+fi
+
 # Install Mullvad VPN + Browser from Mullvad repo (isolated)
 dnf5 config-manager addrepo --from-repofile=https://repository.mullvad.net/rpm/stable/mullvad.repo
 dnf5 install -y \
