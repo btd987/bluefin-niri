@@ -117,6 +117,9 @@ systemctl enable snapper-cleanup.timer
 # Enable libvirtd for VM support
 systemctl enable libvirtd.service
 
+# Enable thinkfan for ThinkPad fan control
+systemctl enable thinkfan.service
+
 # Enable Mullvad VPN daemon
 systemctl enable mullvad-daemon.service
 
