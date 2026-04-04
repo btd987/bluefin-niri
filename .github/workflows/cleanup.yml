@@ -15,6 +15,8 @@ jobs:
         package:
           - bluefin-niri
           - bluefin-niri-nvidia
+          - bazzite-niri
+          - bazzite-niri-nvidia
 
     steps:
       - name: Cleanup old package versions

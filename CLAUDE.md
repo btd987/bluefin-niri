@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Bluefin Niri is a Fedora Atomic (bootc) OCI image layered on top of ublue-os/bluefin-dx. It adds the Niri scrollable-tiling Wayland compositor and DankMaterialShell (DMS) desktop environment.
+Bluefin Niri is a Fedora Atomic (bootc) OCI image layered on top of ublue-os/bluefin-dx (or ublue-os/bazzite for gaming variants). It adds the Niri scrollable-tiling Wayland compositor and DankMaterialShell (DMS) desktop environment.
 
 ## Build Commands
 
@@ -14,6 +14,12 @@ podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bluefin-dx --build-arg VARI
 
 # Local build - NVIDIA
 podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bluefin-dx-nvidia-open --build-arg VARIANT=bluefin-niri-nvidia -t bluefin-niri-nvidia:test .
+
+# Local build - Bazzite AMD/Intel
+podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bazzite --build-arg VARIANT=bazzite-niri -t bazzite-niri:test .
+
+# Local build - Bazzite NVIDIA
+podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bazzite-nvidia --build-arg VARIANT=bazzite-niri-nvidia -t bazzite-niri-nvidia:test .
 ```
 
 ## Architecture
@@ -21,6 +27,8 @@ podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bluefin-dx-nvidia-open --bu
 **Image variants:**
 - `bluefin-niri` - AMD/Intel GPU (base: bluefin-dx)
 - `bluefin-niri-nvidia` - NVIDIA GPU (base: bluefin-dx-nvidia-open)
+- `bazzite-niri` - AMD/Intel GPU gaming (base: bazzite)
+- `bazzite-niri-nvidia` - NVIDIA GPU gaming (base: bazzite-nvidia)
 
 **Release channels:**
 - `stable` - Weekly builds (Tuesdays), pulled from upstream `stable` tag
