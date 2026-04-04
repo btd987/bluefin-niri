@@ -1,8 +1,10 @@
 # Bluefin Niri
 
-A custom Fedora Atomic desktop image built on top of [Bluefin](https://projectbluefin.io/), featuring the [Niri](https://github.com/YaLTeR/niri) scrollable-tiling Wayland compositor and [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) desktop shell.
+A custom Fedora Atomic desktop image built on top of [Bluefin](https://projectbluefin.io/) or [Bazzite](https://bazzite.gg/), featuring the [Niri](https://github.com/YaLTeR/niri) scrollable-tiling Wayland compositor and [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) desktop shell.
 
 ## Images
+
+### Bluefin-based
 
 | Image | Base | GPU Support |
 |-------|------|-------------|
@@ -10,6 +12,15 @@ A custom Fedora Atomic desktop image built on top of [Bluefin](https://projectbl
 | `ghcr.io/btd987/bluefin-niri:stable-daily` | bluefin-dx | AMD/Intel |
 | `ghcr.io/btd987/bluefin-niri-nvidia:stable` | bluefin-dx-nvidia-open | NVIDIA |
 | `ghcr.io/btd987/bluefin-niri-nvidia:stable-daily` | bluefin-dx-nvidia-open | NVIDIA |
+
+### Bazzite-based (gaming)
+
+| Image | Base | GPU Support |
+|-------|------|-------------|
+| `ghcr.io/btd987/bazzite-niri:stable` | bazzite | AMD/Intel |
+| `ghcr.io/btd987/bazzite-niri:stable-daily` | bazzite | AMD/Intel |
+| `ghcr.io/btd987/bazzite-niri-nvidia:stable` | bazzite-nvidia | NVIDIA |
+| `ghcr.io/btd987/bazzite-niri-nvidia:stable-daily` | bazzite-nvidia | NVIDIA |
 
 ### Release Streams
 
@@ -21,11 +32,17 @@ A custom Fedora Atomic desktop image built on top of [Bluefin](https://projectbl
 ### Rebase from existing Fedora Atomic
 
 ```bash
-# AMD/Intel GPU
+# Bluefin - AMD/Intel GPU
 rpm-ostree rebase ostree-unverified-registry:ghcr.io/btd987/bluefin-niri:stable
 
-# NVIDIA GPU
+# Bluefin - NVIDIA GPU
 rpm-ostree rebase ostree-unverified-registry:ghcr.io/btd987/bluefin-niri-nvidia:stable
+
+# Bazzite - AMD/Intel GPU
+rpm-ostree rebase ostree-unverified-registry:ghcr.io/btd987/bazzite-niri:stable
+
+# Bazzite - NVIDIA GPU
+rpm-ostree rebase ostree-unverified-registry:ghcr.io/btd987/bazzite-niri-nvidia:stable
 ```
 
 ### Fresh Install
@@ -71,16 +88,23 @@ ujust niri-version
 ## Building Locally
 
 ```bash
-# AMD/Intel
-podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bluefin-dx -t bluefin-niri:test .
+# Bluefin - AMD/Intel
+podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bluefin-dx --build-arg VARIANT=bluefin-niri -t bluefin-niri:test .
 
-# NVIDIA
-podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bluefin-dx-nvidia-open -t bluefin-niri-nvidia:test .
+# Bluefin - NVIDIA
+podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bluefin-dx-nvidia-open --build-arg VARIANT=bluefin-niri-nvidia -t bluefin-niri-nvidia:test .
+
+# Bazzite - AMD/Intel
+podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bazzite --build-arg VARIANT=bazzite-niri -t bazzite-niri:test .
+
+# Bazzite - NVIDIA
+podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bazzite-nvidia --build-arg VARIANT=bazzite-niri-nvidia -t bazzite-niri-nvidia:test .
 ```
 
 ## Credits
 
 - [Universal Blue](https://universal-blue.org/) - For the amazing ublue-os project
-- [Project Bluefin](https://projectbluefin.io/) - Base image
+- [Project Bluefin](https://projectbluefin.io/) - Base image (Bluefin variants)
+- [Bazzite](https://bazzite.gg/) - Base image (gaming variants)
 - [Niri](https://github.com/YaLTeR/niri) - Compositor
 - [DankMaterialShell](https://github.com/AvengeMedia/DankMaterialShell) - Desktop shell
