@@ -37,6 +37,10 @@ jobs:
             image_name: bluefin-niri
           - base_image: bluefin-dx-nvidia-open
             image_name: bluefin-niri-nvidia
+          - base_image: bazzite
+            image_name: bazzite-niri
+          - base_image: bazzite-nvidia
+            image_name: bazzite-niri-nvidia
 
     steps:
       - name: Determine channel
