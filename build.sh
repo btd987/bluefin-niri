@@ -100,7 +100,12 @@ dnf5 install -y \
     spice-gtk-tools \
     libguestfs-tools-c \
     partclone \
-    libappindicator-gtk3
+    libappindicator-gtk3 \
+    zsh \
+    xdg-desktop-portal-gnome \
+    gnome-keyring \
+    gnome-keyring-pam \
+    pinentry-gnome3
 
 # Install asusctl for NVIDIA variant (ASUS ROG/TUF laptop support)
 if [[ "${VARIANT}" == *"nvidia"* ]]; then
@@ -138,10 +143,13 @@ EOF
 sed -i 's|SHELL=/bin/bash|SHELL=/bin/zsh|' /etc/default/useradd
 
 # Enable DMS and kanshi services by default for all users via systemd preset
+# Disable xwaylandvideobridge (Bazzite ships it for KDE, but it creates a visible
+# white window on Niri since Niri handles screen sharing via portals natively)
 mkdir -p /usr/lib/systemd/user-preset
 cat > /usr/lib/systemd/user-preset/80-bluefin-niri.preset << 'EOF'
 enable dms.service
 enable kanshi.service
+disable app-org.kde.xwaylandvideobridge@autostart.service
 EOF
 
 # Portal configuration for Niri
