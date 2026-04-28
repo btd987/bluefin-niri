@@ -6,12 +6,12 @@ FROM ${BASE_IMAGE}:${TAG}
 
 ARG VARIANT
 
-# Copy build script and system files
+# Copy build script and stage system files for variant-specific installation
 COPY build.sh /tmp/build.sh
-COPY system_files /
+COPY system_files /tmp/system_files
 
 # Run niri installation
-RUN chmod +x /tmp/build.sh && VARIANT="${VARIANT}" /tmp/build.sh && rm /tmp/build.sh
+RUN chmod +x /tmp/build.sh && VARIANT="${VARIANT}" /tmp/build.sh && rm -rf /tmp/build.sh /tmp/system_files
 
 # Validate
 RUN bootc container lint

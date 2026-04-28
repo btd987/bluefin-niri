@@ -33,22 +33,26 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - base_image: bluefin-dx
+          - base_image: ghcr.io/ublue-os/bluefin-dx
             image_name: bluefin-niri
             base_tag_stable: stable
             base_tag_daily: stable-daily
-          - base_image: bluefin-dx-nvidia-open
+          - base_image: ghcr.io/ublue-os/bluefin-dx-nvidia-open
             image_name: bluefin-niri-nvidia
             base_tag_stable: stable
             base_tag_daily: stable-daily
-          - base_image: bazzite
+          - base_image: ghcr.io/ublue-os/bazzite
             image_name: bazzite-niri
             base_tag_stable: stable
             base_tag_daily: latest
-          - base_image: bazzite-nvidia
+          - base_image: ghcr.io/ublue-os/bazzite-nvidia
             image_name: bazzite-niri-nvidia
             base_tag_stable: stable
             base_tag_daily: latest
+          - base_image: quay.io/fedora/fedora-sway-atomic
+            image_name: fedora-44-niri
+            base_tag_stable: "44"
+            base_tag_daily: "44"
 
     steps:
       - name: Determine channel
@@ -84,7 +88,7 @@ jobs:
       - name: Get base image version
         id: base_version
         run: |
-          BASE_IMAGE="ghcr.io/ublue-os/${{ matrix.base_image }}:${{ steps.channel.outputs.base_tag }}"
+          BASE_IMAGE="${{ matrix.base_image }}:${{ steps.channel.outputs.base_tag }}"
           VERSION=$(skopeo inspect docker://${BASE_IMAGE} | jq -r '.Labels["org.opencontainers.image.version"]')
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
 
@@ -118,7 +122,7 @@ jobs:
             ${{ steps.tags.outputs.channel_tag }}
             ${{ steps.tags.outputs.date_tag }}
           build-args: |
-            BASE_IMAGE=ghcr.io/ublue-os/${{ matrix.base_image }}
+            BASE_IMAGE=${{ matrix.base_image }}
             TAG=${{ steps.channel.outputs.base_tag }}
             VARIANT=${{ matrix.image_name }}
           labels: |
