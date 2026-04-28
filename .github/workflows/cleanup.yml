@@ -17,6 +17,7 @@ jobs:
           - bluefin-niri-nvidia
           - bazzite-niri
           - bazzite-niri-nvidia
+          - fedora-44-niri
 
     steps:
       - name: Cleanup old package versions
