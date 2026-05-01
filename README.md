@@ -71,6 +71,9 @@ Use a Fedora Atomic ISO and rebase after first boot. For `fedora-44-niri`, start
 ### Utilities
 - **kitty** - GPU-accelerated terminal
 - **kanshi** - Display configuration daemon
+- **GNOME Software** - Software center for Flatpak installs on the Fedora Sway Atomic variant
+- **Homebrew** - Linuxbrew package manager on the Fedora Sway Atomic variant
+- **Steam** - Gaming client on the Fedora Sway Atomic variant
 - **gamescope** - Gaming compositor
 - **khal** - Calendar application on Bluefin/Bazzite variants
 
@@ -78,6 +81,7 @@ Use a Fedora Atomic ISO and rebase after first boot. For `fedora-44-niri`, start
 - ZSH set as default shell for new users
 - DMS and kanshi services auto-enabled on Bluefin/Bazzite variants
 - Noctalia autostart configured through Niri on the Fedora Sway Atomic variant
+- Flathub configured for Flatpak installs on the Fedora Sway Atomic variant
 - Fedora Sway-style wlroots/GTK portals configured for `fedora-44-niri`
 
 ## Usage

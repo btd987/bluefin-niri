@@ -73,6 +73,41 @@ EOF
     dnf5 config-manager setopt protonvpn-fedora-stable.enabled=0
 }
 
+install_rpmfusion_repos() {
+    local fedora_version
+
+    fedora_version=$(rpm -E %fedora)
+
+    dnf5 install -y \
+        "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${fedora_version}.noarch.rpm" \
+        "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${fedora_version}.noarch.rpm"
+}
+
+install_homebrew() {
+    local brew_prefix="/home/linuxbrew/.linuxbrew"
+
+    install -d -m 0755 /var/home /var/home/linuxbrew
+    HOME=/var/home/linuxbrew NONINTERACTIVE=1 CI=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+
+    rm -rf /var/home/linuxbrew/.cache
+    chown -R root:wheel /var/home/linuxbrew
+    chmod -R g+rwX /var/home/linuxbrew
+    find /var/home/linuxbrew -type d -exec chmod g+s {} +
+    chmod -R go-w "${brew_prefix}/share/zsh" 2>/dev/null || true
+
+    git config --system --add safe.directory "${brew_prefix}/Homebrew"
+
+    cat > /etc/profile.d/homebrew.sh << 'EOF'
+if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
+    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+fi
+EOF
+}
+
+configure_flatpak_remotes() {
+    flatpak remote-add --system --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+}
+
 configure_default_niri_session() {
     # Set Niri as default session for new users via AccountsService template.
     mkdir -p /usr/share/accountsservice/user-templates
@@ -168,13 +203,18 @@ install_fedora_niri_noctalia() {
     sed -i 's/^enabled=1/enabled=0/' /etc/yum.repos.d/terra.repo
     sed -i 's/^enabled_metadata=1/enabled_metadata=0/' /etc/yum.repos.d/terra.repo
 
+    install_rpmfusion_repos
+
     # Install Fedora packages.
     dnf5 install -y \
         niri \
         xwayland-satellite \
+        gnome-software \
+        gnome-software-rpm-ostree \
         kitty \
         kanshi \
         gamescope \
+        steam \
         grim \
         slurp \
         libvirt-daemon-kvm \
@@ -199,13 +239,21 @@ install_fedora_niri_noctalia() {
         pinentry-gnome3 \
         xdg-desktop-portal-wlr \
         xdg-desktop-portal-gtk \
+        curl \
+        fedora-flathub-remote \
+        file \
+        gcc \
         git \
         ImageMagick \
+        make \
+        procps-ng \
         python3 \
         wl-clipboard \
         wlr-randr \
         wget
 
+    configure_flatpak_remotes
+    install_homebrew
     install_vpn_packages
 
     # Enable libvirtd for VM support.
