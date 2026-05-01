@@ -108,6 +108,25 @@ configure_flatpak_remotes() {
     flatpak remote-add --system --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 }
 
+install_gamescope_if_missing() {
+    if rpm -q gamescope >/dev/null 2>&1 || rpm -q terra-gamescope >/dev/null 2>&1; then
+        echo "Gamescope is already installed; skipping Fedora gamescope package"
+        return
+    fi
+
+    dnf5 install -y gamescope
+}
+
+enable_libvirt_service() {
+    if [[ -e /usr/lib/systemd/system/libvirtd.service ]]; then
+        systemctl enable libvirtd.service
+    elif [[ -e /usr/lib/systemd/system/virtqemud.service ]]; then
+        systemctl enable virtqemud.service
+    else
+        echo "No libvirt service unit found; skipping explicit libvirt enable"
+    fi
+}
+
 configure_default_niri_session() {
     # Set Niri as default session for new users via AccountsService template.
     mkdir -p /usr/share/accountsservice/user-templates
@@ -256,8 +275,8 @@ install_fedora_niri_noctalia() {
     install_homebrew
     install_vpn_packages
 
-    # Enable libvirtd for VM support.
-    systemctl enable libvirtd.service
+    # Enable libvirt for VM support.
+    enable_libvirt_service
 
     # Enable Mullvad VPN daemon.
     systemctl enable mullvad-daemon.service
@@ -311,7 +330,6 @@ install_ublue_niri_dms() {
     dnf5 install -y \
         kitty \
         kanshi \
-        gamescope \
         khal \
         thinkfan \
         snapper \
@@ -340,6 +358,8 @@ install_ublue_niri_dms() {
         gnome-keyring-pam \
         pinentry-gnome3
 
+    install_gamescope_if_missing
+
     # Install asusctl for NVIDIA variant (ASUS ROG/TUF laptop support)
     if [[ "${VARIANT}" == *"nvidia"* ]]; then
         echo "Installing asusctl for ASUS laptop support..."
@@ -352,8 +372,8 @@ install_ublue_niri_dms() {
     systemctl enable snapper-timeline.timer
     systemctl enable snapper-cleanup.timer
 
-    # Enable libvirtd for VM support
-    systemctl enable libvirtd.service
+    # Enable libvirt for VM support
+    enable_libvirt_service
 
     # Enable thinkfan for ThinkPad fan control
     systemctl enable thinkfan.service
