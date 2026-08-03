@@ -407,6 +407,13 @@ enable kanshi.service
 disable app-org.kde.xwaylandvideobridge@autostart.service
 EOF
 
+    # Override the package's XDG autostart entry, including for existing users.
+    mkdir -p /etc/xdg/autostart
+    cat > /etc/xdg/autostart/org.kde.xwaylandvideobridge.desktop << 'EOF'
+[Desktop Entry]
+Hidden=true
+EOF
+
     # Portal configuration for Niri
     # Uses GNOME portal (works well with Niri) + GTK fallback
     mkdir -p /usr/share/xdg-desktop-portal
