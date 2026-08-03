@@ -115,7 +115,7 @@ jobs:
 
       - name: Build image
         id: build
-        uses: redhat-actions/buildah-build@v2
+        uses: redhat-actions/buildah-build@v3
         with:
           containerfiles: ./Containerfile
           image: ${{ matrix.image_name }}
@@ -132,7 +132,7 @@ jobs:
 
       - name: Login to GHCR
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        uses: redhat-actions/podman-login@v1
+        uses: redhat-actions/podman-login@v2
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -140,7 +140,7 @@ jobs:
 
       - name: Push to GHCR
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-        uses: redhat-actions/push-to-registry@v2
+        uses: redhat-actions/push-to-registry@v3
         with:
           image: ${{ steps.build.outputs.image }}
           tags: ${{ steps.build.outputs.tags }}
