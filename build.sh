@@ -255,6 +255,7 @@ install_fedora_niri_noctalia() {
         zsh \
         gnome-keyring \
         gnome-keyring-pam \
+        gvfs-fuse \
         gvfs-smb \
         pinentry-gnome3 \
         xdg-desktop-portal-wlr \
@@ -357,6 +358,7 @@ install_ublue_niri_dms() {
         xdg-desktop-portal-gnome \
         gnome-keyring \
         gnome-keyring-pam \
+        gvfs-fuse \
         gvfs-smb \
         pinentry-gnome3
 
