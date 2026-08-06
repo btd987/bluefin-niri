@@ -146,6 +146,3 @@ jobs:
           image: ${{ steps.build.outputs.image }}
           tags: ${{ steps.build.outputs.tags }}
           registry: ${{ env.IMAGE_REGISTRY }}
-          extra-args: |
-            --retry=5
-            --retry-delay=30s
