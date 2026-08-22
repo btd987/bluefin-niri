@@ -336,6 +336,9 @@ install_ublue_niri_dms() {
         thinkfan \
         snapper \
         btrfs-assistant \
+        mdadm \
+        borgbackup \
+        borgmatic \
         grim \
         slurp \
         libvirt-daemon-kvm \

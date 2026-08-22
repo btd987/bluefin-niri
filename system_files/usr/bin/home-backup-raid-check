@@ -1,0 +1,14 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+exec 9>/run/home-backup.lock
+flock -n 9 || exit 0
+
+md_device=$(readlink -f /dev/md/home-backup)
+sync_action="/sys/block/${md_device##*/}/md/sync_action"
+if [[ "$(<"$sync_action")" != "idle" ]]; then
+    echo "Skipping RAID check because another array operation is active."
+    exit 0
+fi
+
+echo check > "$sync_action"

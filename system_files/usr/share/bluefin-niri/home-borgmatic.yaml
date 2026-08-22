@@ -1,0 +1,28 @@
+source_directories:
+    - /var/home
+
+repositories:
+    - path: /var/mnt/home-backup/borg
+      label: home
+      encryption: repokey-blake2
+
+one_file_system: true
+exclude_patterns:
+    - /var/home/.snapshots
+
+encryption_passcommand: cat /etc/borgmatic/home.passphrase
+compression: zstd,3
+archive_name_format: 'home-{now:%Y-%m-%dT%H:%M:%S}'
+
+keep_daily: 14
+keep_weekly: 8
+keep_monthly: 12
+keep_yearly: 2
+
+checks:
+    - name: repository
+      frequency: 1 month
+    - name: archives
+      frequency: 1 month
+    - name: extract
+      frequency: 1 month

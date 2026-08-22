@@ -1,0 +1,11 @@
+[Unit]
+Description=Monthly consistency check of the home backup RAID6 array
+
+[Timer]
+OnCalendar=Sun *-*-01..07 04:00:00
+Persistent=true
+RandomizedDelaySec=6h
+Unit=home-backup-raid-check.service
+
+[Install]
+WantedBy=timers.target

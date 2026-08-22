@@ -1,0 +1,6 @@
+[Unit]
+Description=Start a consistency check of the home backup RAID6 array
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env home-backup-raid-check

@@ -1,0 +1,24 @@
+#!/usr/bin/bash
+set -euo pipefail
+
+exec 9>/run/home-backup.lock
+flock -n 9 || exit 0
+
+md_device=$(readlink -f /dev/md/home-backup)
+sync_action="/sys/block/${md_device##*/}/md/sync_action"
+if (($# == 0)) && [[ -r "$sync_action" && "$(<"$sync_action")" != "idle" ]]; then
+    echo "Skipping backup while RAID synchronization is active."
+    exit 0
+fi
+
+if [[ -x /usr/bin/borgmatic ]]; then
+    borgmatic=/usr/bin/borgmatic
+elif [[ -x /home/linuxbrew/.linuxbrew/bin/borgmatic ]]; then
+    export PATH="/home/linuxbrew/.linuxbrew/bin:$PATH"
+    borgmatic=/home/linuxbrew/.linuxbrew/bin/borgmatic
+else
+    echo "borgmatic is not installed." >&2
+    exit 1
+fi
+
+exec "$borgmatic" --config /etc/borgmatic.d/home.yaml "$@"

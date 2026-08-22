@@ -51,6 +51,20 @@ snapshot desc="manual":
 btrfs-assistant:
     @btrfs-assistant
 
+# Configure the existing encrypted RAID6 volume for Borgmatic backups
+[group('System')]
+setup-home-backup:
+    sudo setup-home-backup
+
+# Show backup, encryption, and RAID status
+[group('System')]
+home-backup-status:
+    @systemctl status home-borgmatic.timer --no-pager
+    @echo ""
+    @findmnt /var/mnt/home-backup || true
+    @echo ""
+    @cat /proc/mdstat
+
 # Configure snapshots for dev machine (15-minute intervals)
 [group('System')]
 configure-snapshots-dev:

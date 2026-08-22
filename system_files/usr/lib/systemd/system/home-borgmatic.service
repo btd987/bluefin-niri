@@ -1,0 +1,12 @@
+[Unit]
+Description=Encrypted Borg backup of /home
+RequiresMountsFor=/var/mnt/home-backup
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/env home-borgmatic
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=infinity
