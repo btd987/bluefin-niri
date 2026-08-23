@@ -1,10 +1,9 @@
 [Unit]
-Description=Daily encrypted Borg backup of /home
+Description=Periodic encrypted Borg backup of /home
 
 [Timer]
-OnCalendar=*-*-* 03:15:00
-Persistent=true
-RandomizedDelaySec=30m
+OnActiveSec=15m
+OnUnitInactiveSec=2h
 Unit=home-borgmatic.service
 
 [Install]

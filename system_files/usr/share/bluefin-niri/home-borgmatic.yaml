@@ -14,6 +14,7 @@ encryption_passcommand: cat /etc/borgmatic/home.passphrase
 compression: zstd,3
 archive_name_format: 'home-{now:%Y-%m-%dT%H:%M:%S}'
 
+keep_within: 2d
 keep_daily: 14
 keep_weekly: 8
 keep_monthly: 12
