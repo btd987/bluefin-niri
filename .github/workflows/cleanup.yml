@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: Cleanup old package versions
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const package_name = '${{ matrix.package }}';

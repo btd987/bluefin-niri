@@ -35,7 +35,7 @@ jobs:
       contents: read
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -99,7 +99,7 @@ jobs:
         uses: ublue-os/remove-unwanted-software@v9
 
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           persist-credentials: false
 
@@ -173,7 +173,7 @@ jobs:
 
       - name: Upload release image
         if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.image_name }}
           path: ${{ runner.temp }}/release/
@@ -198,7 +198,7 @@ jobs:
 
       # No checkout or image execution in the write-token job.
       - name: Download release image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.image_name }}
           path: ${{ runner.temp }}/release/
