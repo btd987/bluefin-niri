@@ -1,18 +1,13 @@
 #!/usr/bin/bash
 set -ouex pipefail
 
-is_fedora_variant() {
-    [[ "${VARIANT}" == fedora-* ]]
-}
-
 install_staged_system_files() {
     if [[ -d /tmp/system_files ]]; then
         cp -a /tmp/system_files/. /
     fi
 }
 
-# Secure COPR installation helper
-# Enables COPR temporarily, disables it, then installs with isolated repo
+# Allow only the requested packages and known vendor dependencies from each COPR.
 copr_install_isolated() {
     local copr_name="$1"
     local repo_id
@@ -25,11 +20,18 @@ copr_install_isolated() {
     fi
 
     repo_id="copr:copr.fedorainfracloud.org:${copr_name//\//:}"
+    local include_packages
+    include_packages=$(IFS=,; echo "${packages[*]}")
+    if [[ "$copr_name" == lukenukem/asus-linux ]]; then
+        # Current RPM name providing the requested rog-control-center command.
+        include_packages+=",asusctl-rog-gui"
+    fi
 
     echo "Installing ${packages[*]} from COPR $copr_name (isolated)"
 
     dnf5 -y copr enable "$copr_name"
     dnf5 -y copr disable "$copr_name"
+    dnf5 config-manager setopt "${repo_id}.includepkgs=${include_packages}"
     dnf5 -y install --enablerepo="$repo_id" "${packages[@]}"
 
     echo "Installed ${packages[*]} from $copr_name"
@@ -51,6 +53,7 @@ install_vpn_packages() {
 
     # Install Mullvad VPN + Browser from Mullvad repo (isolated)
     dnf5 config-manager addrepo --from-repofile=https://repository.mullvad.net/rpm/stable/mullvad.repo
+    dnf5 config-manager setopt mullvad-stable.includepkgs=mullvad-vpn,mullvad-browser
     dnf5 install -y \
         mullvad-vpn \
         mullvad-browser
@@ -62,6 +65,7 @@ install_vpn_packages() {
 name=ProtonVPN Fedora Stable
 baseurl=https://repo.protonvpn.com/fedora-$releasever-stable/
 enabled=1
+includepkgs=proton-vpn-gnome-desktop,proton-vpn-cli,proton-vpn-gtk-app,proton-vpn-daemon,python3-proton-core,python3-proton-keyring-linux,python3-proton-vpn-api-core
 gpgcheck=1
 gpgkey=https://repo.protonvpn.com/fedora-$releasever-stable/public_key.asc
 EOF
@@ -71,41 +75,6 @@ EOF
         proton-vpn-gnome-desktop \
         proton-vpn-cli
     dnf5 config-manager setopt protonvpn-fedora-stable.enabled=0
-}
-
-install_rpmfusion_repos() {
-    local fedora_version
-
-    fedora_version=$(rpm -E %fedora)
-
-    dnf5 install -y \
-        "https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-${fedora_version}.noarch.rpm" \
-        "https://mirrors.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${fedora_version}.noarch.rpm"
-}
-
-install_homebrew() {
-    local brew_prefix="/home/linuxbrew/.linuxbrew"
-
-    install -d -m 0755 /var/home /var/home/linuxbrew
-    HOME=/var/home/linuxbrew NONINTERACTIVE=1 CI=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-
-    rm -rf /var/home/linuxbrew/.cache
-    chown -R root:wheel /var/home/linuxbrew
-    chmod -R g+rwX /var/home/linuxbrew
-    find /var/home/linuxbrew -type d -exec chmod g+s {} +
-    chmod -R go-w "${brew_prefix}/share/zsh" 2>/dev/null || true
-
-    git config --system --add safe.directory "${brew_prefix}/Homebrew"
-
-    cat > /etc/profile.d/homebrew.sh << 'EOF'
-if [ -x /home/linuxbrew/.linuxbrew/bin/brew ]; then
-    eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
-fi
-EOF
-}
-
-configure_flatpak_remotes() {
-    flatpak remote-add --system --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 }
 
 install_gamescope_if_missing() {
@@ -137,16 +106,6 @@ SystemAccount=false
 EOF
 }
 
-configure_sddm_niri_session() {
-    # SDDM preselects the last session from its state file.
-    mkdir -p /var/lib/sddm
-    cat > /var/lib/sddm/state.conf << 'EOF'
-[Last]
-Session=niri.desktop
-EOF
-    chown sddm:sddm /var/lib/sddm/state.conf 2>/dev/null || true
-}
-
 configure_os_release() {
     local niri_variant="$1"
     local niri_variant_id="$2"
@@ -169,31 +128,34 @@ configure_os_release() {
     echo "BUILD_ID=\"${build_date}\"" >> "$os_release"
 }
 
-configure_fedora_niri_noctalia() {
+configure_niri_noctalia() {
     mkdir -p /etc/niri
     install -Dm0644 /usr/share/doc/niri/default-config.kdl /etc/niri/config.kdl
 
     # Noctalia is started by Niri, which is the upstream-recommended method.
-    sed -i 's|^spawn-at-startup "waybar"$|spawn-at-startup "qs" "-c" "noctalia-shell"|' /etc/niri/config.kdl
+    sed -i 's|^spawn-at-startup "waybar"$|spawn-at-startup "noctalia"|' /etc/niri/config.kdl
+    sed -i 's|This line starts waybar, a commonly used bar for Wayland compositors.|This line starts the native Noctalia desktop shell.|' /etc/niri/config.kdl
     sed -i 's|Mod+T hotkey-overlay-title="Open a Terminal: alacritty" { spawn "alacritty"; }|Mod+T hotkey-overlay-title="Open a Terminal: kitty" { spawn "kitty"; }|' /etc/niri/config.kdl
 
     sed -i '/^binds {/a\
-    Mod+Space { spawn-sh "qs -c noctalia-shell ipc call launcher toggle"; }\
-    Mod+S { spawn-sh "qs -c noctalia-shell ipc call controlCenter toggle"; }
+    Mod+Space { spawn "noctalia" "msg" "panel-toggle" "launcher"; }\
+    Mod+S { spawn "noctalia" "msg" "panel-toggle" "control-center"; }
 ' /etc/niri/config.kdl
-    sed -i 's|Mod+Comma  { consume-window-into-column; }|Mod+Comma { spawn-sh "qs -c noctalia-shell ipc call settings toggle"; }|' /etc/niri/config.kdl
-    sed -i 's|XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+ -l 1.0"; }|XF86AudioRaiseVolume allow-when-locked=true { spawn "qs" "-c" "noctalia-shell" "ipc" "call" "volume" "increase"; }|' /etc/niri/config.kdl
-    sed -i 's|XF86AudioLowerVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1-"; }|XF86AudioLowerVolume allow-when-locked=true { spawn "qs" "-c" "noctalia-shell" "ipc" "call" "volume" "decrease"; }|' /etc/niri/config.kdl
-    sed -i 's|XF86AudioMute        allow-when-locked=true { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"; }|XF86AudioMute        allow-when-locked=true { spawn "qs" "-c" "noctalia-shell" "ipc" "call" "volume" "muteOutput"; }|' /etc/niri/config.kdl
-    sed -i 's|XF86MonBrightnessUp allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "+10%"; }|XF86MonBrightnessUp allow-when-locked=true { spawn "qs" "-c" "noctalia-shell" "ipc" "call" "brightness" "increase"; }|' /etc/niri/config.kdl
-    sed -i 's|XF86MonBrightnessDown allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "10%-"; }|XF86MonBrightnessDown allow-when-locked=true { spawn "qs" "-c" "noctalia-shell" "ipc" "call" "brightness" "decrease"; }|' /etc/niri/config.kdl
+    sed -i 's|Mod+D hotkey-overlay-title="Run an Application: fuzzel" { spawn "fuzzel"; }|Mod+D hotkey-overlay-title="Run an Application: Noctalia" { spawn "noctalia" "msg" "panel-toggle" "launcher"; }|' /etc/niri/config.kdl
+    sed -i 's|Super+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }|Mod+Alt+L hotkey-overlay-title="Lock the Screen: Noctalia" { spawn "noctalia" "msg" "session" "lock"; }|' /etc/niri/config.kdl
+    sed -i 's|Mod+Comma  { consume-window-into-column; }|Mod+Comma { spawn "noctalia" "msg" "settings-toggle"; }|' /etc/niri/config.kdl
+    sed -i 's|XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+ -l 1.0"; }|XF86AudioRaiseVolume allow-when-locked=true { spawn "noctalia" "msg" "volume-up"; }|' /etc/niri/config.kdl
+    sed -i 's|XF86AudioLowerVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1-"; }|XF86AudioLowerVolume allow-when-locked=true { spawn "noctalia" "msg" "volume-down"; }|' /etc/niri/config.kdl
+    sed -i 's|XF86AudioMute        allow-when-locked=true { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"; }|XF86AudioMute        allow-when-locked=true { spawn "noctalia" "msg" "volume-mute"; }|' /etc/niri/config.kdl
+    sed -i 's|XF86MonBrightnessUp allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "+10%"; }|XF86MonBrightnessUp allow-when-locked=true { spawn "noctalia" "msg" "brightness-up"; }|' /etc/niri/config.kdl
+    sed -i 's|XF86MonBrightnessDown allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "10%-"; }|XF86MonBrightnessDown allow-when-locked=true { spawn "noctalia" "msg" "brightness-down"; }|' /etc/niri/config.kdl
 
     cat >> /etc/niri/config.kdl << 'EOF'
 
 // Noctalia integration.
 window-rule {
-    geometry-corner-radius 20
-    clip-to-geometry true
+    match app-id=r#"^dev\.noctalia\.Noctalia$"#
+    open-floating true
 }
 
 debug {
@@ -201,112 +163,45 @@ debug {
 }
 
 layer-rule {
-    match namespace="^noctalia-overview*"
+    match namespace="^noctalia-backdrop"
     place-within-backdrop true
 }
 EOF
 
-    niri validate
-
-    # Use Fedora Sway's wlroots/GTK portal preference for the Niri session.
-    cp /usr/share/xdg-desktop-portal/wlroots-portals.conf /usr/share/xdg-desktop-portal/niri-portals.conf
+    # Fail rather than silently shipping incomplete integration if Niri defaults change.
+    local expected
+    for expected in \
+        'spawn-at-startup "noctalia"' \
+        '    Mod+T hotkey-overlay-title="Open a Terminal: kitty" { spawn "kitty"; }' \
+        '    Mod+Space { spawn "noctalia" "msg" "panel-toggle" "launcher"; }' \
+        '    Mod+D hotkey-overlay-title="Run an Application: Noctalia" { spawn "noctalia" "msg" "panel-toggle" "launcher"; }' \
+        '    Mod+S { spawn "noctalia" "msg" "panel-toggle" "control-center"; }' \
+        '    Mod+Comma { spawn "noctalia" "msg" "settings-toggle"; }' \
+        '    Mod+Alt+L hotkey-overlay-title="Lock the Screen: Noctalia" { spawn "noctalia" "msg" "session" "lock"; }' \
+        '    XF86AudioRaiseVolume allow-when-locked=true { spawn "noctalia" "msg" "volume-up"; }' \
+        '    XF86AudioLowerVolume allow-when-locked=true { spawn "noctalia" "msg" "volume-down"; }' \
+        '    XF86AudioMute        allow-when-locked=true { spawn "noctalia" "msg" "volume-mute"; }' \
+        '    XF86MonBrightnessUp allow-when-locked=true { spawn "noctalia" "msg" "brightness-up"; }' \
+        '    XF86MonBrightnessDown allow-when-locked=true { spawn "noctalia" "msg" "brightness-down"; }'; do
+        if [[ $(grep -Fxc "$expected" /etc/niri/config.kdl) -ne 1 ]]; then
+            echo "Missing or duplicated Niri default: $expected" >&2
+            return 1
+        fi
+    done
+    if [[ $(grep -Ec '^[[:space:]]*spawn-at-startup[[:space:]]+"noctalia"' /etc/niri/config.kdl) -ne 1 ]]; then
+        echo "Expected exactly one Noctalia startup in Niri defaults" >&2
+        return 1
+    fi
+    # Conservative line checks: unfamiliar upstream layouts require manual review.
+    if grep -E '^[[:space:]]*(spawn(-sh)?(-at-startup)?|[^/[:space:]][^{]*\{[[:space:]]*spawn(-sh)?)[[:space:]]+"(waybar|fuzzel|swaylock|alacritty|dms|qs|quickshell)("|[[:space:]])' /etc/niri/config.kdl; then
+        echo "Obsolete shell command in Niri defaults" >&2
+        return 1
+    fi
+    niri validate --config /etc/niri/config.kdl
 }
 
-install_fedora_niri_noctalia() {
-    echo "Installing Fedora 44 Niri compositor + Noctalia shell..."
-
-    # Install Noctalia from Terra, then disable Terra so future transactions use Fedora by default.
-    dnf5 install -y --nogpgcheck --repofrompath 'terra,https://repos.fyralabs.com/terra$releasever' terra-release
-    dnf5 install -y \
-        noctalia-shell
-    sed -i 's/^enabled=1/enabled=0/' /etc/yum.repos.d/terra.repo
-    sed -i 's/^enabled_metadata=1/enabled_metadata=0/' /etc/yum.repos.d/terra.repo
-
-    install_rpmfusion_repos
-
-    # Install Fedora packages.
-    dnf5 install -y \
-        niri \
-        xwayland-satellite \
-        gnome-software \
-        gnome-software-rpm-ostree \
-        kitty \
-        kanshi \
-        gamescope \
-        steam \
-        grim \
-        slurp \
-        libvirt-daemon-kvm \
-        qemu-kvm \
-        virt-manager \
-        virt-install \
-        virt-viewer \
-        swtpm \
-        swtpm-tools \
-        edk2-ovmf \
-        guestfs-tools \
-        libvirt-nss \
-        libvirt-daemon-config-network \
-        virt-top \
-        spice-gtk-tools \
-        libguestfs-tools-c \
-        partclone \
-        libappindicator-gtk3 \
-        zsh \
-        gnome-keyring \
-        gnome-keyring-pam \
-        gvfs-fuse \
-        gvfs-smb \
-        pinentry-gnome3 \
-        xdg-desktop-portal-wlr \
-        xdg-desktop-portal-gtk \
-        curl \
-        fedora-flathub-remote \
-        file \
-        gcc \
-        git \
-        ImageMagick \
-        make \
-        procps-ng \
-        python3 \
-        wl-clipboard \
-        wlr-randr \
-        wget
-
-    configure_flatpak_remotes
-    install_homebrew
-    install_vpn_packages
-
-    # Enable libvirt for VM support.
-    enable_libvirt_service
-
-    # Enable Mullvad VPN daemon.
-    systemctl enable mullvad-daemon.service
-
-    # Polkit rule: allow libvirt group to manage VMs without password.
-    mkdir -p /etc/polkit-1/rules.d
-    cat > /etc/polkit-1/rules.d/50-libvirt.rules << 'EOF'
-polkit.addRule(function(action, subject) {
-    if (action.id == "org.libvirt.unix.manage" &&
-        subject.isInGroup("libvirt")) {
-        return polkit.Result.YES;
-    }
-});
-EOF
-
-    # Set zsh as default shell for new users.
-    sed -i 's|SHELL=/bin/bash|SHELL=/bin/zsh|' /etc/default/useradd
-
-    configure_fedora_niri_noctalia
-    configure_default_niri_session
-    configure_sddm_niri_session
-    configure_os_release "Niri Noctalia" "niri-noctalia"
-
-    echo "Fedora 44 Niri + Noctalia installation complete"
-}
-
-install_ublue_niri_dms() {
-    echo "Installing Niri compositor + DMS shell..."
+install_ublue_niri_noctalia() {
+    echo "Installing Niri compositor + native Noctalia shell..."
 
     install_staged_system_files
 
@@ -315,16 +210,8 @@ install_ublue_niri_dms() {
         niri \
         xwayland-satellite
 
-    # Install Quickshell-git and DMS utilities from COPR (avengemedia/danklinux)
-    # quickshell-git has full feature support (Polkit, IdleMonitor, etc.)
-    copr_install_isolated avengemedia/danklinux \
-        quickshell-git \
-        matugen \
-        danksearch
-
-    # Install DMS (DankMaterialShell) from COPR
-    copr_install_isolated avengemedia/dms \
-        dms
+    # Native v5 comes from Fedora, not the legacy Quickshell/Terra packages.
+    dnf5 install -y --repo=fedora --repo=updates 'noctalia >= 5.0.0'
 
     install_vpn_packages
 
@@ -402,12 +289,11 @@ EOF
     # Set zsh as default shell for new users
     sed -i 's|SHELL=/bin/bash|SHELL=/bin/zsh|' /etc/default/useradd
 
-    # Enable DMS and kanshi services by default for all users via systemd preset
+    # Enable kanshi via systemd preset; Noctalia starts only through Niri.
     # Disable xwaylandvideobridge (Bazzite ships it for KDE, but it creates a visible
     # white window on Niri since Niri handles screen sharing via portals natively)
     mkdir -p /usr/lib/systemd/user-preset
     cat > /usr/lib/systemd/user-preset/80-bluefin-niri.preset << 'EOF'
-enable dms.service
 enable kanshi.service
 disable app-org.kde.xwaylandvideobridge@autostart.service
 EOF
@@ -427,7 +313,11 @@ EOF
 default=gnome;gtk
 EOF
 
+    configure_niri_noctalia
     configure_default_niri_session
+
+    rpm -q noctalia
+    noctalia --version
 
     if [[ "${VARIANT}" == *"nvidia"* ]]; then
         configure_os_release "Niri NVIDIA" "niri-nvidia"
@@ -435,11 +325,15 @@ EOF
         configure_os_release "Niri" "niri"
     fi
 
-    echo "Niri + DMS installation complete"
+    echo "Niri + native Noctalia installation complete"
 }
 
-if is_fedora_variant; then
-    install_fedora_niri_noctalia
-else
-    install_ublue_niri_dms
-fi
+case "${VARIANT}" in
+    ""|bluefin-niri|bluefin-niri-nvidia|bazzite-niri|bazzite-niri-nvidia)
+        install_ublue_niri_noctalia
+        ;;
+    *)
+        echo "Unsupported image variant: ${VARIANT}" >&2
+        exit 1
+        ;;
+esac

@@ -1,9 +1,9 @@
-# Niri compositor and DMS shell recipes
+# Niri compositor and native Noctalia shell recipes
 
 # Switch to Niri session
 [group('Desktop')]
 niri-session:
-    @echo "Log out and select 'Niri' from the session menu in GDM"
+    @echo "Log out and select 'Niri' from the session menu in your existing display manager"
 
 # Reload Niri configuration
 [group('Desktop')]
@@ -15,7 +15,7 @@ niri-reload:
 niri-version:
     @niri --version
     @echo ""
-    @rpm -q dms || echo "DMS not installed"
+    @rpm -q noctalia || echo "Noctalia not installed"
 
 # Initialize snapper for btrfs snapshots (run once after install)
 # Note: On Fedora Atomic, only /var/home is a btrfs subvolume.
@@ -29,9 +29,18 @@ setup-snapshots:
         exit 1
     fi
     echo "Setting up snapper for /var/home snapshots..."
-    snapper -c home create-config /var/home 2>/dev/null || echo "Config already exists"
+    configs=$(snapper --csvout --no-headers list-configs --columns config)
+    if ! grep -Fxq home <<< "$configs"; then
+        snapper -c home create-config /var/home
+    fi
+    config=$(snapper --csvout --no-headers -c home get-config --columns key,value)
+    if ! grep -Fxq 'SUBVOLUME,/var/home' <<< "$config"; then
+        echo "Error: Snapper config 'home' must target /var/home; no existing settings were changed." >&2
+        exit 1
+    fi
     echo ""
-    echo "Snapper configured! Timeline snapshots will run automatically."
+    echo "Snapper config 'home' is configured for /var/home."
+    echo "Automatic timeline snapshots require TIMELINE_CREATE=yes and an active snapper-timeline.timer."
     echo "Note: System rollback uses 'bootc rollback', not btrfs snapshots."
     echo "Use 'btrfs-assistant' for GUI or 'ujust list-snapshots' to view."
 

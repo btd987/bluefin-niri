@@ -1,8 +1,9 @@
 ARG BASE_IMAGE="ghcr.io/ublue-os/bluefin-dx"
 ARG TAG="stable"
+ARG BASE_REF="${BASE_IMAGE}:${TAG}"
 ARG VARIANT=""
 
-FROM ${BASE_IMAGE}:${TAG}
+FROM ${BASE_REF}
 
 ARG VARIANT
 
