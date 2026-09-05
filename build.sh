@@ -218,6 +218,7 @@ install_ublue_niri_noctalia() {
     # Install additional packages from Fedora repos
     dnf5 install -y \
         kitty \
+        nautilus \
         kanshi \
         khal \
         thinkfan \
