@@ -1,0 +1,14 @@
+[Unit]
+Description=PolicyKit authentication agent for Niri
+PartOf=graphical-session.target
+After=graphical-session.target
+Requisite=graphical-session.target
+
+[Service]
+# XDG_CURRENT_DESKTOP is a colon-separated list; $$ escapes systemd expansion.
+ExecCondition=/bin/sh -c 'case ":$${XDG_CURRENT_DESKTOP}:" in *:niri:*) exit 0;; *) exit 1;; esac'
+ExecStart=/usr/libexec/polkit-mate-authentication-agent-1
+Restart=on-failure
+
+[Install]
+WantedBy=niri.service

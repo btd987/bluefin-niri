@@ -1,0 +1,15 @@
+# Unpublished runtime. Default unsigned local proof; candidate selects verified.
+# Use --no-cache for verified builds: mounted artifact changes may reuse layers.
+# podman build -f Containerfile.zfs-runtime --build-arg ZFS_RPM_IMAGE=localhost/zfs-rpms-test-proof:latest -t localhost/zfs-runtime:proof .
+ARG ZFS_RPM_IMAGE=localhost/zfs-rpms-test-proof:latest
+FROM ${ZFS_RPM_IMAGE} AS zfs-rpm-artifacts
+
+FROM quay.io/fedora/fedora-bootc:44@sha256:d6481b291e960abb02a346294dcac2818df8dfe2b1bc51d1ae8fa53a15718756 AS zfs-runtime
+ARG ZFS_RPM_TRUST_MODE=unsigned-proof
+ARG ZFS_RPM_SIGNING_FINGERPRINT
+RUN if [ "$ZFS_RPM_TRUST_MODE" = verified ]; then \
+        dnf5 -y --exclude='kernel*' install gnupg2 && dnf5 clean all; \
+    fi
+COPY scripts/install-zfs-rpms.sh scripts/validate-zfs.sh /tmp/zfs-runtime/
+RUN --mount=type=bind,from=zfs-rpm-artifacts,source=/,target=/run/zfs-rpms \
+    bash /tmp/zfs-runtime/install-zfs-rpms.sh

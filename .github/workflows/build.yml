@@ -39,9 +39,18 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Test workflow invariants and shell syntax
+      - name: Install test dependencies
         run: |
-          python3 -m unittest discover -s tests -p test_build_ci.py -v
+          sudo apt-get update && sudo apt-get install -y python3-yaml
+          # Noble's Just 1.21 lacks group and positional-arguments attributes.
+          cargo install --locked --version 1.57.0 just --root "$RUNNER_TEMP/just"
+          echo "$RUNNER_TEMP/just/bin" >> "$GITHUB_PATH"
+
+      - name: Run standard unit tests
+        run: |
+          command -v just
+          /usr/bin/python3 -c 'import yaml'
+          /usr/bin/python3 -m unittest discover -s tests -v
 
   build:
     needs: validate
@@ -55,10 +64,6 @@ jobs:
         include:
           - base_image: ghcr.io/ublue-os/bluefin-dx
             image_name: bluefin-niri
-            base_tag_stable: stable
-            base_tag_daily: stable-daily
-          - base_image: ghcr.io/ublue-os/bluefin-dx-nvidia-open
-            image_name: bluefin-niri-nvidia
             base_tag_stable: stable
             base_tag_daily: stable-daily
           - base_image: ghcr.io/ublue-os/bazzite
@@ -191,7 +196,7 @@ jobs:
       fail-fast: false
       max-parallel: 2
       matrix:
-        image_name: [bluefin-niri, bluefin-niri-nvidia, bazzite-niri, bazzite-niri-nvidia]
+        image_name: [bluefin-niri, bazzite-niri, bazzite-niri-nvidia]
     steps:
       - name: Maximize publish space
         uses: ublue-os/remove-unwanted-software@v9

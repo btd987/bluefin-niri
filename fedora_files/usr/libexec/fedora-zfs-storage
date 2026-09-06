@@ -1,0 +1,228 @@
+#!/usr/bin/python3 -I
+"""Opt-in mounting of existing ZFS storage. Never provisions or migrates data."""
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+
+CONFIG = Path('/etc/fedora-zfs-storage')
+ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C', 'HOME': '/root'}
+
+
+def require(ok, message):
+    if not ok:
+        raise ValueError(message)
+
+
+def command(args, **kwargs):
+    return subprocess.run(args, env=ENV, check=True, capture_output=True,
+                          **kwargs).stdout.decode().strip()
+
+
+def name(value):
+    require(isinstance(value, str) and len(value) <= 200 and
+            re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]*(/[A-Za-z0-9_][A-Za-z0-9_-]*)*', value),
+            'Unsupported dataset name')
+    return value
+
+
+def protected(path, file=False):
+    require(path.is_absolute() and str(path) == os.path.normpath(str(path)), 'Noncanonical path')
+    for part in [*reversed(path.parents), path]:
+        info = part.lstat()
+        leaf = part == path and file
+        require(info.st_uid == 0 and not info.st_mode & 0o022 and
+                (stat.S_ISREG(info.st_mode) if leaf else stat.S_ISDIR(info.st_mode)),
+                f'Unsafe path ownership, permissions or symlink: {part}')
+        if leaf:
+            require(stat.S_IMODE(info.st_mode) == 0o600 and info.st_nlink == 1,
+                    'Files must be root-owned 0600, without hard links')
+
+
+def validate(job):
+    require(type(job) is dict and set(job) == {
+        'dataset', 'guid', 'pool_guid', 'mountpoint', 'mode', 'encryptionroot',
+        'root_guid', 'unlock', 'keyfile'}, 'Invalid configuration fields')
+    ds = name(job['dataset'])
+    for key in ('guid', 'pool_guid'):
+        require(isinstance(job[key], str) and re.fullmatch(r'[1-9][0-9]{0,19}', job[key]), 'Invalid GUID')
+    mp = job['mountpoint']
+    require(isinstance(mp, str) and re.fullmatch(r'/var/(mnt/[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*|home)', mp),
+            'Only /var/home or simple paths below /var/mnt are supported')
+    require(job['mode'] == ('home' if mp == '/var/home' else 'data'), 'Invalid mount mode')
+    root = job['encryptionroot']
+    require(root == '-' or (name(root) and (ds == root or ds.startswith(root + '/'))),
+            'Encryption root must be an ancestor in the selected pool')
+    require(job['unlock'] in ('none', 'ask', 'keyfile'), 'Invalid unlock mode')
+    require((root == '-' and job['root_guid'] == '-' and job['unlock'] == 'none') or
+            (root != '-' and isinstance(job['root_guid'], str) and
+             re.fullmatch(r'[1-9][0-9]{0,19}', job['root_guid']) and job['unlock'] != 'none'),
+            'Encryption identity/unlock mismatch')
+    require(isinstance(job['keyfile'], str), 'Invalid keyfile')
+    if job['unlock'] == 'keyfile':
+        protected(Path(job['keyfile']), file=True)
+    else:
+        require(job['keyfile'] == '', 'Unexpected keyfile')
+
+
+def prop(ds, key):
+    return command(['zfs', 'get', '-H', '-p', '-o', 'value', key, ds])
+
+
+def pools(job, importing=False):
+    pool = job['dataset'].split('/')[0]
+    rows = [row.split('\t') for row in command(['zpool', 'list', '-H', '-p', '-o', 'name,guid']).splitlines()]
+    require(all(len(row) == 2 for row in rows), 'Unexpected pool listing')
+    matches = [row for row in rows if row[0] == pool or row[1] == job['pool_guid']]
+    if not matches and importing:
+        command(['zpool', 'import', '-N', '-o', 'cachefile=none', job['pool_guid']])
+        return pools(job)
+    require(matches == [[pool, job['pool_guid']]], 'Pool absent or name/GUID collision')
+
+
+def inspect(job, enrolling=False):
+    validate(job)
+    pools(job)
+    ds = job['dataset']
+    for key, expected in [('type', 'filesystem'), ('guid', job['guid']),
+                          ('mountpoint', job['mountpoint']), ('encryptionroot', job['encryptionroot'])]:
+        require(prop(ds, key) == expected, f'Dataset {key} changed or unsafe')
+    require(prop(ds, 'canmount') in ('on', 'noauto'), 'Dataset cannot be mounted')
+    root = job['encryptionroot']
+    if root != '-':
+        require(prop(root, 'encryptionroot') == root and prop(root, 'guid') == job['root_guid'],
+                'Encryption root identity changed')
+        require(prop(root, 'keystatus') in ('available', 'unavailable'), 'Invalid key status')
+        require(job['unlock'] != 'ask' or prop(root, 'keyformat') == 'passphrase',
+                'Password mode requires a passphrase encryption root')
+    mp = Path(job['mountpoint'])
+    protected(mp)
+    mounts = json.loads(command(['findmnt', '--json', '--list', '-o', 'TARGET,SOURCE,FSTYPE']))['filesystems']
+    exact = [m for m in mounts if m['target'] == str(mp)]
+    require(not any(m['target'].startswith(str(mp) + '/') for m in mounts), 'Nested mounts are not supported')
+    mounted = prop(ds, 'mounted')
+    if exact:
+        require(len(exact) == 1 and exact[0]['source'] == ds and exact[0]['fstype'] == 'zfs'
+                and mounted == 'yes', 'Mountpoint occupied by another filesystem')
+        return True
+    require(mounted == 'no', 'Dataset mounted elsewhere')
+    require(not (enrolling and job['mode'] == 'home'), '/var/home must ALREADY be mounted from this dataset')
+    require(not any(mp.iterdir()), 'Refusing nonempty unmounted directory; no migration supported')
+    return False
+
+
+def mount(job):
+    validate(job)
+    pools(job, importing=True)
+    if inspect(job):
+        return
+    root = job['encryptionroot']
+    if root != '-' and prop(root, 'keystatus') == 'unavailable':
+        args = ['zfs', 'load-key', '-L', 'prompt', root]
+        if job['unlock'] == 'keyfile':
+            protected(Path(job['keyfile']), file=True)
+            fd = os.open(job['keyfile'], os.O_RDONLY | os.O_NOFOLLOW)
+            with os.fdopen(fd, 'rb') as key:
+                command(['zfs', 'load-key', '-L', f'file:///proc/self/fd/{key.fileno()}', root],
+                        pass_fds=(key.fileno(),))
+        else:
+            # Keep the secret out of argv, Python strings, and diagnostic output.
+            with subprocess.Popen(['systemd-ask-password', '--timeout=60', 'ZFS storage key:'],
+                                  env=ENV, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as ask:
+                try:
+                    command(args, stdin=ask.stdout)
+                finally:
+                    ask.stdout.close()
+                require(ask.wait() == 0, 'Password request failed')
+        require(prop(root, 'keystatus') == 'available' and prop(job['dataset'], 'keystatus') == 'available',
+                'Selected dataset is still locked')
+    if root != '-':
+        require(prop(job['dataset'], 'keystatus') == 'available', 'Selected dataset is still locked')
+    # Recheck the directory after the potentially interactive unlock.
+    if not inspect(job):
+        command(['zfs', 'mount', job['dataset']])
+    require(inspect(job), 'Mount did not appear')
+
+
+def main():
+    require(len(sys.argv) >= 2, 'Usage: fedora-zfs-storage status | enroll NAME | run NAME home|data')
+    if sys.argv[1:] == ['status']:
+        for args in (['zpool', 'list', '-H', '-o', 'name,guid'],
+                     ['zfs', 'list', '-o', 'name,guid,mountpoint,mounted,encryptionroot'],
+                     ['findmnt', '-t', 'zfs']):
+            print(command(args))
+        return
+    require(os.geteuid() == 0, 'Root required')
+    require(len(sys.argv) in (3, 4) and re.fullmatch(r'[a-z][a-z0-9-]{0,39}', sys.argv[2]), 'Invalid name')
+    action, ident = sys.argv[1:3]
+    require((action == 'enroll' and len(sys.argv) == 3) or
+            (action == 'run' and len(sys.argv) == 4 and sys.argv[3] in ('home', 'data')), 'Invalid operation')
+    os.umask(0o077)
+    protected(CONFIG.parent)
+    if action == 'enroll':
+        CONFIG.mkdir(mode=0o700, exist_ok=True)
+    protected(CONFIG)
+    require(stat.S_IMODE(CONFIG.stat().st_mode) == 0o700, 'Configuration directory must be 0700')
+    fd = os.open(CONFIG, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        # Boot jobs may legitimately overlap; serialize configuration reads and mounts.
+        fcntl.flock(fd, fcntl.LOCK_EX | (fcntl.LOCK_NB if action == 'enroll' else 0))
+        path = CONFIG / (ident + '.json')
+        if action == 'run':
+            protected(path, file=True)
+            job = json.loads(path.read_text())
+            validate(job)
+            require(job['mode'] == sys.argv[3], 'Wrong service template')
+            mount(job)
+            return
+        require(not os.path.lexists(path), 'Enrollment/partial enrollment exists; inspect manually, no overwrite or reuse')
+        ds = name(input('Existing imported filesystem dataset: ').strip())
+        mp = prop(ds, 'mountpoint')
+        root = prop(ds, 'encryptionroot')
+        job = dict(dataset=ds, guid=prop(ds, 'guid'),
+                   pool_guid=command(['zpool', 'get', '-H', '-p', '-o', 'value', 'guid', ds.split('/')[0]]),
+                   mountpoint=mp, mode='home' if mp == '/var/home' else 'data', encryptionroot=root,
+                   root_guid='-' if root == '-' else prop(root, 'guid'), unlock='none', keyfile='')
+        if root != '-':
+            job['unlock'] = input('Confirm unlock mode [ask/keyfile]: ').strip()
+            if job['unlock'] == 'keyfile':
+                job['keyfile'] = input('Existing root-owned 0600 keyfile absolute path: ').strip()
+        inspect(job, enrolling=True)
+        for other in CONFIG.iterdir():
+            protected(other, file=True)
+            old = json.loads(other.read_text())
+            validate(old)
+            a, b = old['mountpoint'], mp
+            require(old['guid'] != job['guid'] and not (a == b or a.startswith(b + '/') or b.startswith(a + '/')),
+                    'Duplicate dataset or overlapping path enrollment')
+        print(json.dumps(job, indent=2))
+        print('No provisioning or migration. Existing path consumers must agree to this mount.\n'
+              'Home failure blocks user sessions. Stop never unmounts or unloads keys.\n'
+              'Activation failure leaves configuration: inspect manually; enrollment will not overwrite it.')
+        if input(f'Type ENROLL {job["mode"]} {mp} to agree and enable: ') != f'ENROLL {job["mode"]} {mp}':
+            return
+        inspect(job, enrolling=True)
+        with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), 'w') as out:
+            json.dump(job, out, indent=2)
+            out.flush()
+            os.fsync(out.fileno())
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    # Activation waits for a runtime process that needs the same lock.
+    command(['systemctl', 'daemon-reload'])
+    command(['systemctl', 'enable', '--now', f'fedora-zfs-storage-{job["mode"]}@{ident}.service'])
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (ValueError, KeyError, TypeError, OSError, EOFError, subprocess.SubprocessError):
+        # Never relay subprocess output: key-loading diagnostics may contain secrets.
+        print('Storage enrollment/activation refused or failed; inspect identities, paths and configuration. '
+              'Existing or partial enrollment is never overwritten. No automatic cleanup.', file=sys.stderr)
+        sys.exit(1)

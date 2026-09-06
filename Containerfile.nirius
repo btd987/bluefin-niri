@@ -1,0 +1,11 @@
+# Unpublished build artifact only; no runtime integration or startup changes.
+FROM quay.io/fedora/fedora-bootc:44@sha256:d6481b291e960abb02a346294dcac2818df8dfe2b1bc51d1ae8fa53a15718756 AS builder
+RUN dnf5 -y --exclude=kernel,kernel-core,kernel-modules,kernel-modules-core,kernel-modules-extra install rust cargo gcc curl tar gzip && dnf5 clean all
+WORKDIR /build
+ENV CARGO_HOME=/build/cargo
+COPY scripts/build-nirius.sh /build/build-nirius.sh
+RUN bash /build/build-nirius.sh
+
+# Dynamically linked executables: this image is an export, not a runnable image.
+FROM scratch AS artifact
+COPY --from=builder /out/ /

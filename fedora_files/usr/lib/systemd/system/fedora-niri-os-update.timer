@@ -1,0 +1,10 @@
+[Unit]
+Description=Stage Fedora Niri OS updates every six hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:00:00
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

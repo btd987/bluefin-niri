@@ -1,0 +1,4 @@
+# The vendor timer uses bootc upgrade --apply, which can reboot automatically.
+disable bootc-fetch-apply-updates.timer
+enable fedora-niri-os-update.timer
+enable fedora-niri-flatpak-update.timer

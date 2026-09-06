@@ -1,0 +1,323 @@
+#!/usr/bin/python3 -I
+"""Opt-in Borg enrollment. Existing storage and legacy backups are never modified."""
+
+import argparse
+import fcntl
+import getpass
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import stat
+import subprocess
+import sys
+from urllib.parse import urlsplit
+import warnings
+
+import yaml
+
+ROOT = Path('/etc/niri-backup')
+UNITS = Path('/etc/systemd/system')
+RAID_LOCK = Path('/run/raid-maintenance.lock')
+SYS_BLOCK = Path('/sys/class/block')
+ENV = {'PATH': '/usr/bin:/usr/sbin', 'LC_ALL': 'C', 'HOME': '/root',
+       'BORG_RSH': 'ssh -oBatchMode=yes -oStrictHostKeyChecking=yes'}
+
+
+def run_backup(directory):
+    # Participating maintenance holds this same inode until kernel work finishes.
+    with os.fdopen(os.open(RAID_LOCK, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600), 'r+') as lock:
+        info = os.fstat(lock.fileno())
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != 0 or
+                stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
+            raise ValueError('Unsafe RAID coordination lock ownership, type or permissions.')
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print('Skipping backup and retention: RAID maintenance lock is held.')
+            return
+        try:
+            jobs = run('systemctl', '--system', 'list-jobs', '--no-legend', '--no-pager', '--plain', capture=True)
+            for line in jobs.splitlines():
+                if line.strip() == 'No jobs running.':
+                    continue
+                fields = line.split()
+                if len(fields) < 2:
+                    raise ValueError('Unrecognized systemd job listing.')
+                unit = fields[1]
+                if (unit.startswith(('mdcheck', 'mdadm')) or
+                        unit in ('raid-maintenance.service', 'home-backup-raid-check.service')):
+                    print('Skipping backup and retention: md maintenance job is queued/running.')
+                    return
+            for block in SYS_BLOCK.iterdir():
+                md = block / 'md'
+                if md.is_dir() and (md / 'sync_action').read_text().strip() != 'idle':
+                    print('Skipping backup and retention: an md array is busy.')
+                    return
+        except (OSError, ValueError, subprocess.CalledProcessError):
+            print('Skipping backup and retention: cannot establish md maintenance is idle.')
+            return
+        validate(directory)
+        config = str(directory / 'config.yaml')
+        # Never age out recovery points when creation fails or reports warnings.
+        run('borgmatic', '--config', config, 'create')
+        run('borgmatic', '--config', config, 'prune', 'compact', 'check')
+
+
+def run(*args, capture=False):
+    # Keep Borg overrides, Python loaders and credential/cache paths out of caller control.
+    return subprocess.run(args, check=True, env=ENV, text=True, stdin=subprocess.DEVNULL,
+                          stdout=subprocess.PIPE if capture else None).stdout
+
+
+def name_check(name):
+    if not re.fullmatch(r'[a-z][a-z0-9-]{0,31}', name):
+        raise ValueError('Name must be 1-32 lowercase letters/digits/hyphens, starting with a letter.')
+    return name
+
+
+def confirm(message):
+    if input(message + ' Type yes: ').strip() != 'yes':
+        raise ValueError('Cancelled; no further actions taken.')
+
+
+def mount_identity(path):
+    if not os.path.ismount(path) or path == '/':
+        raise ValueError('Select an existing mounted filesystem, not / or an unmounted directory.')
+    info = json.loads(run('findmnt', '--json', '--mountpoint', path,
+                          '--output', 'TARGET,SOURCE,UUID', capture=True))['filesystems'][0]
+    return {'target': info['target'], 'source': info['source'], 'uuid': info.get('uuid')}
+
+
+def source_identity(path):
+    return json.loads(run('findmnt', '--json', '--target', path,
+                          '--output', 'TARGET,SOURCE,UUID', capture=True))['filesystems'][0]
+
+
+def local_check(meta):
+    if meta['mount'] is not None:
+        if mount_identity(meta['mount']['target']) != meta['mount']:
+            raise ValueError('Backup destination mount identity changed; refusing backup.')
+        repo = Path(meta['repository'])
+        if str(repo.resolve()) != str(repo) or not repo.is_relative_to(meta['mount']['target']):
+            raise ValueError('Repository path changed or escaped the selected mount.')
+
+
+def write_new(path, text):
+    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600), 'w') as stream:
+        stream.write(text)
+
+
+def secure(path, directory=False):
+    info = path.lstat()
+    if (info.st_uid != os.geteuid() or
+            stat.S_IMODE(info.st_mode) != (0o700 if directory else 0o600) or
+            not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode))):
+        raise ValueError('Unsafe ownership, type or permissions: ' + str(path))
+
+
+def validate(directory):
+    secure(ROOT, True)
+    secure(directory, True)
+    for filename in ('enrollment.json', 'config.yaml', 'passphrase'):
+        secure(directory / filename)
+    meta = json.loads((directory / 'enrollment.json').read_text())
+    if meta['schedule'] not in ('hourly', 'daily', 'weekly'):
+        raise ValueError('Invalid enrolled schedule.')
+    config = yaml.safe_load((directory / 'config.yaml').read_text())
+    if [repo['path'] for repo in config['repositories']] != [meta['repository']]:
+        raise ValueError('Repository configuration differs from enrollment mount protection.')
+    if config.get('match_archives') != 'sh:' + directory.name + '-????-??-??T??:??:??.??????':
+        raise ValueError('Review match_archives: retention must match only this name and its timestamp, not NAME-*.')
+    excluded = [ROOT, *([Path(meta['repository'])] if meta['mount'] is not None else [])]
+    required = ['pp:' + str(path) for path in excluded] + ['sh:**/.snapshots']
+    if not set(required).issubset(config.get('exclude_patterns', [])):
+        raise ValueError('Restore configuration, repository and .snapshots exclusions before reuse.')
+    if not config['source_directories']:
+        raise ValueError('At least one source is required.')
+    if set(config['source_directories']) != set(meta.get('source_mounts', {})):
+        raise ValueError('Source enrollment identity is missing or differs; review enrollment before reuse.')
+    for value in config['source_directories']:
+        source = Path(value)
+        if (not source.is_absolute() or not source.is_dir() or source.resolve() != source or
+                '.snapshots' in source.parts or any(source.is_relative_to(path) for path in excluded)):
+            raise ValueError('Source is missing, changed or excluded: ' + value)
+        if source_identity(value) != meta['source_mounts'][value]:
+            raise ValueError('Source filesystem identity changed; refusing backup: ' + value)
+    local_check(meta)
+    run('borgmatic', '--config', str(directory / 'config.yaml'), 'config', 'validate')
+    return meta
+
+
+def activate(name, directory, meta):
+    confirm('Enable only backup@' + name + '.timer (' + meta['schedule'] + ', may run immediately)?')
+    dropin = UNITS / ('backup@' + name + '.timer.d')
+    content = '[Timer]\nOnCalendar=\nOnCalendar=' + meta['schedule'] + '\n'
+    if os.path.lexists(dropin):
+        if (dropin.is_symlink() or not dropin.is_dir() or
+                dropin.stat().st_uid != os.geteuid() or dropin.stat().st_mode & 0o022 or
+                (dropin / 'schedule.conf').is_symlink() or
+                list(dropin.iterdir()) != [dropin / 'schedule.conf'] or
+                (dropin / 'schedule.conf').read_text() != content):
+            raise ValueError('Existing timer override differs; refusing to overwrite it.')
+    else:
+        dropin.mkdir(mode=0o755)
+        write_new(dropin / 'schedule.conf', content)
+    run('systemctl', 'daemon-reload')
+    run('systemctl', 'enable', '--now', 'backup@' + name + '.timer')
+    if input('Run an initial backup now? Type yes: ').strip() == 'yes':
+        run('systemctl', 'start', '--no-block', 'backup@' + name + '.service')
+    print('Keep an independent copy of the repository key and passphrase. Verify a restore into an empty directory.')
+    print('Configuration: ' + str(directory / 'config.yaml'))
+    print('List archives: sudo borgmatic --config ' + str(directory / 'config.yaml') + ' list')
+    print('Restore selected files from an empty directory: sudo borgmatic --config ' +
+          str(directory / 'config.yaml') + ' extract --archive ARCHIVE --path PATH')
+
+
+def enroll(name, reuse=False):
+    directory = ROOT / name
+    if os.path.lexists(ROOT):
+        secure(ROOT, True)
+    if os.path.lexists(directory):
+        if not reuse:
+            raise ValueError('Configuration exists. Use --reuse NAME to validate and explicitly re-enable it; nothing is overwritten.')
+        confirm('Reuse existing configuration without rewriting credentials or settings?')
+        meta = validate(directory)
+        run('borgmatic', '--config', str(directory / 'config.yaml'), 'repo-info')
+        activate(name, directory, meta)
+        return
+    if reuse:
+        raise ValueError('No existing configuration to reuse.')
+    sources = []
+    print('Enter absolute source directories one at a time; blank finishes.')
+    while True:
+        value = input('Source: ').strip()
+        if not value:
+            break
+        source = Path(value)
+        if not source.is_absolute() or not source.is_dir() or '\n' in value:
+            raise ValueError('Sources must be existing absolute directories.')
+        source = str(source.resolve())
+        if source not in sources:
+            sources.append(source)
+    if not sources:
+        raise ValueError('At least one source is required.')
+    boundary = input('Stay within each source filesystem? [yes/no]: ').strip()
+    if boundary not in ('yes', 'no'):
+        raise ValueError('Choose yes or no.')
+    kind = input('Destination [local/ssh]: ').strip()
+    mount = None
+    if kind == 'local':
+        target = str(Path(input('Existing mount point: ').strip()).resolve())
+        mount = mount_identity(target)
+        leaf = name_check(input('Repository directory name within that mount: ').strip())
+        repository = str(Path(target) / leaf)
+        if str(Path(repository).resolve()) != repository:
+            raise ValueError('Symlink repository paths are not supported.')
+    elif kind == 'ssh':
+        repository = input('SSH repository (ssh://user@host/absolute/path): ').strip()
+        url = urlsplit(repository)
+        if (url.scheme != 'ssh' or not url.hostname or url.password or url.path == '/'
+                or url.query or url.fragment or
+                not re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9.:-]*', url.hostname) or
+                (url.username is not None and not re.fullmatch(r'[a-zA-Z0-9_][a-zA-Z0-9_.-]*', url.username)) or
+                (url.port is not None and not 1 <= url.port <= 65535) or
+                not re.fullmatch(r'ssh://[a-zA-Z0-9_.@:\[\]-]+/[a-zA-Z0-9_./-]+', repository)):
+            raise ValueError('Use an SSH URL without passwords, spaces, query strings or shell syntax.')
+        print('Provision root SSH keys and verified known_hosts separately. SSH is noninteractive and host-key checking is mandatory.')
+    else:
+        raise ValueError('Choose local or ssh.')
+    excluded = [ROOT, *([Path(repository)] if kind == 'local' else [])]
+    for source in sources:
+        if '.snapshots' in Path(source).parts or any(Path(source).is_relative_to(path) for path in excluded):
+            raise ValueError('A source is inside an excluded configuration, repository or .snapshots directory.')
+    action = input('Repository action [reuse/initialize]: ').strip()
+    if action not in ('reuse', 'initialize'):
+        raise ValueError('Choose reuse or initialize.')
+    if kind == 'local' and action == 'initialize' and Path(repository).exists():
+        raise ValueError('Initialization requires a nonexistent repository directory.')
+    schedule = input('Schedule [hourly/daily/weekly]: ').strip()
+    if schedule not in ('hourly', 'daily', 'weekly'):
+        raise ValueError('Choose hourly, daily or weekly.')
+    retention = {}
+    for period in ('daily', 'weekly', 'monthly'):
+        value = input('Number of ' + period + ' archives to retain (1-999): ').strip()
+        if not value.isdigit() or not 1 <= int(value) <= 999:
+            raise ValueError('Retention must be between 1 and 999.')
+        retention['keep_' + period] = int(value)
+    checks = input('Repository and archive checks [always/monthly]: ').strip()
+    if checks not in ('always', 'monthly'):
+        raise ValueError('Choose always or monthly.')
+    meta = {'mount': mount, 'repository': repository, 'schedule': schedule,
+            'source_mounts': {source: source_identity(source) for source in sources}}
+    config = {
+        'source_directories': sources,
+        'repositories': [{'path': repository, 'label': name}],
+        'one_file_system': boundary == 'yes',
+        'exclude_patterns': ['pp:' + str(path) for path in excluded] + ['sh:**/.snapshots'],
+        'encryption_passcommand': 'cat ' + shlex.quote(str(directory / 'passphrase')),
+        'compression': 'zstd,3',
+        'archive_name_format': name + '-{now:%Y-%m-%dT%H:%M:%S.%f}',
+        'match_archives': 'sh:' + name + '-????-??-??T??:??:??.??????',
+        'checks': [{'name': item, 'frequency': 'always' if checks == 'always' else '1 month'}
+                   for item in ('repository', 'archives')],
+        **retention,
+    }
+    print(yaml.safe_dump(config, sort_keys=False))
+    print('Schedule: ' + schedule + '; repository action: ' + action)
+    print('Backups read live files: running VMs/databases need separate coordination. Snapshots are unchanged.')
+    print('Same-device backups share a failure domain. Keep independent offline or remote copies.')
+    print('Retention prunes this backup name\'s archives. No mounts, RAID, LUKS or storage maintenance will be configured.')
+    confirm('Write this named configuration and credentials?')
+    if not sys.stdin.isatty():
+        raise ValueError('A terminal is required for secret prompts.')
+    with warnings.catch_warnings():
+        warnings.simplefilter('error', getpass.GetPassWarning)
+        secret = getpass.getpass('Repository passphrase (not echoed): ')
+        if not secret or '\n' in secret or '\r' in secret or secret != getpass.getpass('Confirm passphrase: '):
+            raise ValueError('Passphrases must be nonempty and match.')
+    local_check(meta)
+    ROOT.mkdir(mode=0o700, exist_ok=True)
+    secure(ROOT, True)
+    directory.mkdir(mode=0o700)
+    write_new(directory / 'passphrase', secret)
+    del secret
+    write_new(directory / 'config.yaml', yaml.safe_dump(config, sort_keys=False))
+    write_new(directory / 'enrollment.json', json.dumps(meta))
+    validate(directory)
+    if action == 'initialize':
+        confirm('Initialize encrypted Borg repository at ' + repository + '?')
+        run('borgmatic', '--config', str(directory / 'config.yaml'), 'repo-create', '--encryption', 'repokey-blake2')
+    run('borgmatic', '--config', str(directory / 'config.yaml'), 'repo-info')
+    activate(name, directory, meta)
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--reuse', metavar='NAME')
+    group.add_argument('--run', metavar='NAME', help='run an enrolled backup (systemd)')
+    parser.add_argument('name', nargs='?')
+    args = parser.parse_args()
+    if os.geteuid() != 0:
+        raise ValueError('Run with sudo: sudo setup-backup [NAME]')
+    os.umask(0o077)
+    name = name_check(args.run or args.reuse or args.name or input('Backup name: ').strip())
+    # Serialize enrollment and execution for this name, including repository creation.
+    with os.fdopen(os.open('/run/niri-backup-' + name + '.lock',
+                           os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600), 'w') as lock:
+        # A newly enabled persistent timer may fire before enrollment releases this lock.
+        fcntl.flock(lock, fcntl.LOCK_EX | (0 if args.run else fcntl.LOCK_NB))
+        if args.run:
+            run_backup(ROOT / name)
+        else:
+            enroll(name, reuse=bool(args.reuse))
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (ValueError, OSError, subprocess.CalledProcessError, EOFError, KeyboardInterrupt, getpass.GetPassWarning) as error:
+        print('Backup operation stopped: ' + str(error), file=sys.stderr)
+        sys.exit(1)

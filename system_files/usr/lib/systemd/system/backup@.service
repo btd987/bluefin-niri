@@ -1,0 +1,13 @@
+[Unit]
+Description=Opt-in Borg backup (%i)
+Wants=network-online.target
+After=network-online.target local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/setup-backup --run %i
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=infinity

@@ -1,0 +1,80 @@
+# Unpublished desktop proof. No signing inputs are copied from the build context.
+ARG BASE_IMAGE=localhost/zfs-runtime:proof
+# Verified local artifact image ID: e583ed74e0bc7d3ee1cdb5659dff9becc1e7c1ad63358905252512b1380ee8f1
+ARG NIRIUS_IMAGE=localhost/nirius-artifact:0.9.0
+FROM ${NIRIUS_IMAGE} AS nirius-artifact
+FROM ${BASE_IMAGE}
+
+COPY build.sh /tmp/build.sh
+COPY system_files /tmp/system_files
+COPY fedora_files /tmp/fedora_files
+COPY scripts/validate-zfs.sh /tmp/validate-zfs.sh
+
+RUN /usr/bin/bash -euo pipefail <<'EOF'
+test -f /run/.containerenv || test -f /.dockerenv
+kernel=$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-core)
+[[ $kernel =~ ^[[:alnum:]_+]+([.][[:alnum:]_+]+)*-[[:alnum:]_+]+([.][[:alnum:]_+]+)+$ ]]
+serial=$(openssl x509 -inform DER -in /usr/share/zfs/zfs-signing-cert.der -noout -serial)
+[[ $serial =~ ^serial=([[:xdigit:]]{2})+$ ]]
+key=$(printf '%s' "${serial#serial=}" | sed 's/../&:/g; s/:$//')
+VARIANT=fedora-niri-proof bash /tmp/build.sh
+test "$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-core)" = "$kernel"
+depmod -a "$kernel"
+bash /tmp/validate-zfs.sh 2.4.4 "$key"
+dnf5 clean all
+rm -rf /tmp/build.sh /tmp/system_files /tmp/fedora_files /tmp/validate-zfs.sh \
+    /var/cache/libdnf5 /var/lib/dnf /var/lib/dnf5 /run/dnf /run/selinux-policy \
+    /run/gluster /run/openvpn-client /run/openvpn-server \
+    /var/cache/swcatalog /var/cache/ibus
+rm -f /var/log/dnf* /var/cache/ldconfig/aux-cache
+bootc container lint
+EOF
+
+COPY --from=nirius-artifact /nirius /niriusd /usr/bin/
+COPY --from=nirius-artifact /provenance.txt /usr/share/niri-system/nirius-provenance.txt
+COPY scripts/install-fedora-tools.sh scripts/install-fedora-editors.sh scripts/install-fedora-cli.sh scripts/install-sanoid.sh scripts/install-fedora-fonts.sh scripts/validate-zfs.sh /tmp/
+
+RUN /usr/bin/bash -euo pipefail <<'EOF'
+test -f /run/.containerenv || test -f /.dockerenv
+kernel=$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-core)
+[[ $kernel =~ ^[[:alnum:]_+]+([.][[:alnum:]_+]+)*-[[:alnum:]_+]+([.][[:alnum:]_+]+)+$ ]]
+serial=$(openssl x509 -inform DER -in /usr/share/zfs/zfs-signing-cert.der -noout -serial)
+[[ $serial =~ ^serial=([[:xdigit:]]{2})+$ ]]
+key=$(printf '%s' "${serial#serial=}" | sed 's/../&:/g; s/:$//')
+config=$(mktemp -d)
+trap 'rm -rf -- "$config"' EXIT
+export HOME="$config" XDG_CONFIG_HOME="$config/config" XDG_CACHE_HOME="$config/cache" XDG_DATA_HOME="$config/data" XDG_STATE_HOME="$config/state"
+# Fail on an already-damaged parent as well as any installer collision with ZFS.
+rpm --verify zfs
+zfs_integrity=$(sha256sum /sbin/zed /usr/lib/systemd/system/zfs-zed.service)
+bash /tmp/install-fedora-tools.sh
+bash /tmp/install-fedora-editors.sh
+bash /tmp/install-fedora-cli.sh
+bash /tmp/install-sanoid.sh
+bash /tmp/install-fedora-fonts.sh
+# BCC weakly recommends kernel-devel, which pulls GCC into the desktop runtime.
+dnf5 -y remove kernel-devel
+printf '%s\n' "$zfs_integrity" | sha256sum --check --strict -
+rpm --verify zfs
+test "$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-core)" = "$kernel"
+depmod -a "$kernel"
+bash /tmp/validate-zfs.sh 2.4.4 "$key"
+ZED_ALLOW_ROOT=true zeditor --version
+devpod version
+starship --version
+yazi --version
+ya --version
+lazygit --version
+nirius --version
+# niriusd does not implement --version; invoking it starts the session daemon.
+test -x /usr/bin/niriusd
+dnf5 clean all
+rm -rf /tmp/install-fedora-tools.sh /tmp/install-fedora-editors.sh /tmp/install-fedora-cli.sh /tmp/install-sanoid.sh /tmp/install-fedora-fonts.sh /tmp/validate-zfs.sh \
+    /var/cache/libdnf5 /var/lib/dnf /var/lib/dnf5 /run/dnf
+# DNF transaction logs may be directories; only remove its known log namespace.
+rm -rf /var/log/dnf*
+rm -f /var/cache/ldconfig/aux-cache
+rm -rf -- "$config"
+trap - EXIT
+bootc container lint
+EOF

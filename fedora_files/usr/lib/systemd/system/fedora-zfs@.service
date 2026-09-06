@@ -1,0 +1,11 @@
+[Unit]
+Description=Explicitly enrolled ZFS maintenance (%i)
+After=local-fs.target network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 -I /usr/libexec/fedora-zfs run %i
+UMask=0077
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

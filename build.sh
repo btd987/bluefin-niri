@@ -4,6 +4,9 @@ set -ouex pipefail
 install_staged_system_files() {
     if [[ -d /tmp/system_files ]]; then
         cp -a /tmp/system_files/. /
+        install -Dm0755 /tmp/system_files/usr/bin/setup-backup /usr/bin/setup-backup
+        install -Dm0755 /tmp/system_files/usr/bin/setup-home-backup /usr/bin/setup-home-backup
+        install -Dm0755 /tmp/system_files/usr/bin/setup-raid-maintenance /usr/bin/setup-raid-maintenance
     fi
 }
 
@@ -227,6 +230,7 @@ install_ublue_niri_noctalia() {
         mdadm \
         borgbackup \
         borgmatic \
+        python3-pyyaml \
         grim \
         slurp \
         libvirt-daemon-kvm \
@@ -245,6 +249,7 @@ install_ublue_niri_noctalia() {
         libguestfs-tools-c \
         partclone \
         libappindicator-gtk3 \
+        just \
         zsh \
         xdg-desktop-portal-gnome \
         gnome-keyring \
@@ -329,9 +334,128 @@ EOF
     echo "Niri + native Noctalia installation complete"
 }
 
+install_mise() (
+    set -euo pipefail
+    dnf5 install -y --repo=fedora --repo=updates dnf5-plugins gnupg2 curl ca-certificates
+
+    # Release key fingerprint published at https://mise.jdx.dev/installing-mise.html.
+    local fingerprint="24853EC9F655CE80B48E6C3A8B81C9D17413A06D"
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    trap 'rm -rf -- "$tmp_dir"' EXIT
+
+    curl --fail --location --proto '=https' --proto-redir '=https' \
+        --output "$tmp_dir/mise-key.pub" https://mise.jdx.dev/gpg-key.pub
+    local actual
+    actual=$(gpg --batch --homedir "$tmp_dir" --show-keys --with-colons "$tmp_dir/mise-key.pub" |
+        awk -F: '$1 == "pub" { primary = 1 } $1 == "fpr" && primary { print $10; primary = 0 }')
+    if [[ "$actual" != "$fingerprint" ]]; then
+        echo "ERROR: mise release key fingerprint mismatch" >&2
+        exit 1
+    fi
+    install -Dm0644 "$tmp_dir/mise-key.pub" /etc/pki/rpm-gpg/RPM-GPG-KEY-mise
+
+    # Upstream https://mise.jdx.dev/rpm/mise.repo, restricted before registration.
+    cat > "$tmp_dir/mise.repo" << 'EOF'
+[mise-repo]
+name=mise repo
+baseurl=https://mise.jdx.dev/rpm
+enabled=0
+includepkgs=mise
+gpgcheck=1
+repo_gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-mise
+EOF
+    dnf5 config-manager addrepo --from-repofile="$tmp_dir/mise.repo"
+    dnf5 install -y --repo=fedora --repo=updates --repo=mise-repo mise
+    rpm -q mise
+    mise --version
+)
+
+# Unpublished foundation; production dispatch remains gated on booted validation.
+install_fedora_niri_foundation() {
+    # Require inherited bootc tooling used by the shared recipes.
+    rpm -q bootc rpm-ostree
+
+    # COPR and config-manager are used by the shared installer below.
+    dnf5 install -y dnf5-plugins just
+
+    # Desktop components otherwise inherited from Bluefin/Bazzite.
+    dnf5 install -y \
+        gdm \
+        accountsservice \
+        NetworkManager \
+        NetworkManager-wifi \
+        NetworkManager-bluetooth \
+        bluez \
+        pipewire \
+        pipewire-alsa \
+        pipewire-pulseaudio \
+        wireplumber \
+        alsa-sof-firmware \
+        upower \
+        power-profiles-daemon \
+        mesa-dri-drivers \
+        mesa-vulkan-drivers \
+        libva-utils \
+        linux-firmware \
+        xdg-desktop-portal \
+        xdg-desktop-portal-gtk \
+        xdg-utils \
+        shared-mime-info \
+        polkit \
+        mate-polkit \
+        at-spi2-core \
+        orca \
+        google-noto-sans-fonts \
+        google-noto-emoji-color-fonts \
+        brightnessctl \
+        playerctl \
+        wl-clipboard \
+        podman \
+        flatpak \
+        sudo \
+        curl \
+        ca-certificates \
+        tar \
+        gzip \
+        coreutils
+
+    install_mise
+    install_ublue_niri_noctalia
+
+    cp -a /tmp/fedora_files/. /
+    install -Dm0755 /tmp/fedora_files/usr/libexec/fedora-zfs /usr/libexec/fedora-zfs
+    install -Dm0755 /tmp/fedora_files/usr/libexec/fedora-zfs-storage /usr/libexec/fedora-zfs-storage
+    test -x /usr/libexec/polkit-mate-authentication-agent-1
+    test -x /usr/bin/bootc
+    test -x /usr/bin/flatpak
+    test -f /usr/lib/systemd/user/niri.service
+    systemctl --global preset niri-polkit-agent.service
+    systemctl preset bootc-fetch-apply-updates.timer fedora-niri-os-update.timer fedora-niri-flatpak-update.timer
+    # Shared ThinkPad defaults must not enable fan control on arbitrary hardware.
+    systemctl disable thinkfan.service
+    # Fedora proof storage scheduling is opt-in, including after system presets.
+    mkdir -p /usr/lib/systemd/system-preset
+    printf '%s\n' 'disable snapper-timeline.timer' 'disable snapper-cleanup.timer' \
+        > /usr/lib/systemd/system-preset/00-fedora-niri-snapshots.preset
+    systemctl disable snapper-timeline.timer snapper-cleanup.timer
+
+    systemctl enable NetworkManager.service bluetooth.service power-profiles-daemon.service
+    systemctl enable gdm.service
+    systemctl set-default graphical.target
+}
+
 case "${VARIANT}" in
-    ""|bluefin-niri|bluefin-niri-nvidia|bazzite-niri|bazzite-niri-nvidia)
+    ""|bluefin-niri|bazzite-niri|bazzite-niri-nvidia)
         install_ublue_niri_noctalia
+        ;;
+    fedora-niri)
+        echo "fedora-niri is not enabled: exact-kernel ZFS integration and validation are pending" >&2
+        exit 1
+        ;;
+    fedora-niri-proof)
+        install_fedora_niri_foundation
         ;;
     *)
         echo "Unsupported image variant: ${VARIANT}" >&2

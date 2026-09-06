@@ -1,0 +1,152 @@
+#!/usr/bin/python3 -I
+"""Opt-in checks of one existing md array; never create, repair or mount storage.
+
+Backup integration: take an exclusive flock on /run/raid-maintenance.lock for
+the entire backup, then inspect md sync_action before starting. The lock covers
+this helper only, not kernel recovery or other administrators/jobs. Never unlink
+the lock. A sysfs-only preflight has a race and cannot guarantee exclusion.
+"""
+
+import argparse
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import subprocess
+import sys
+import time
+
+CONFIG = Path('/etc/raid-maintenance.json')
+SYS_BLOCK = Path('/sys/class/block')
+LOCK = Path('/run/raid-maintenance.lock')
+TIMER = 'raid-maintenance.timer'
+
+
+def command(*args):
+    return subprocess.run(args, check=True, text=True, stdout=subprocess.PIPE,
+                          stdin=subprocess.DEVNULL,
+                          env={'PATH': '/usr/sbin:/usr/bin', 'LC_ALL': 'C'}).stdout
+
+
+def identity(device):
+    device = Path(device).resolve(strict=True)
+    if device.parent != Path('/dev') or not re.fullmatch(r'md[0-9]+', device.name):
+        raise ValueError('Select an existing /dev/mdN array (aliases are resolved).')
+    info = os.stat(device)
+    if not stat.S_ISBLK(info.st_mode):
+        raise ValueError('Selected device is not a block device.')
+    block = SYS_BLOCK / device.name
+    number = f'{os.major(info.st_rdev)}:{os.minor(info.st_rdev)}'
+    if (block / 'dev').read_text().strip() != number:
+        raise ValueError('Device and sysfs identity differ.')
+    md = block / 'md'
+    if not md.is_dir():
+        raise ValueError('Selected device is not an md array.')
+    details = command('mdadm', '--detail', '--export', str(device))
+    uuids = [line.removeprefix('MD_UUID=') for line in details.splitlines()
+             if line.startswith('MD_UUID=')]
+    if len(uuids) != 1 or not re.fullmatch(r'[0-9a-fA-F]{8}(?::[0-9a-fA-F]{8}){3}', uuids[0]):
+        raise ValueError('mdadm did not report one valid array UUID.')
+    return {'device': str(device), 'uuid': uuids[0].lower()}, md
+
+
+def secure_file(fd):
+    info = os.fstat(fd)
+    if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022:
+        raise ValueError('Unsafe file ownership, type or permissions.')
+
+
+def selected():
+    with os.fdopen(os.open(CONFIG, os.O_RDONLY | os.O_NOFOLLOW), 'r') as stream:
+        secure_file(stream.fileno())
+        saved = json.load(stream)
+    if not isinstance(saved, dict) or set(saved) != {'device', 'uuid'}:
+        raise ValueError('Invalid selection configuration.')
+    current, md = identity(saved['device'])
+    if current != saved:
+        raise ValueError('Selected array UUID or device changed; refusing check.')
+    return saved, md
+
+
+def check():
+    with os.fdopen(os.open(LOCK, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600), 'r+') as lock:
+        secure_file(lock.fileno())
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print('Skipping: maintenance/participating backup lock is held.')
+            return
+        saved, md = selected()
+        action = md / 'sync_action'
+        if action.read_text().strip() != 'idle':
+            print('Skipping: selected array operation is not idle.')
+            return
+        if (md / 'array_state').read_text().strip() not in ('clean', 'active', 'active-idle'):
+            print('Skipping: selected array is read-only or not active.')
+            return
+        # Revalidate immediately before requesting the kernel check, not repair.
+        current, current_md = identity(saved['device'])
+        if current != saved or current_md != md:
+            raise ValueError('Selected array identity changed; refusing check.')
+        if action.read_text().strip() != 'idle':
+            print('Skipping: selected array became busy.')
+            return
+        action.write_text('check\n')
+        print('Requested check for ' + saved['device'] + '; waiting while holding backup coordination lock.', flush=True)
+        # The sysfs write starts asynchronous work. Do not release the lock on return
+        # from that write; hold it through the kernel operation instead.
+        while True:
+            current, current_md = identity(saved['device'])
+            if current != saved or current_md != md:
+                raise ValueError('Array identity changed while monitoring the check.')
+            if action.read_text().strip() == 'idle':
+                break
+            time.sleep(10)
+        print('Array is idle again. Review kernel logs and mismatch_cnt; this is not a data-integrity guarantee.')
+
+
+def enroll():
+    if os.path.lexists(CONFIG):
+        raise ValueError('Selection already exists; review/remove it explicitly before enrolling again.')
+    print(command('lsblk', '--list', '--paths', '--output', 'NAME,TYPE,SIZE,FSTYPE'))
+    saved, md = identity(input('Existing md array device: ').strip())
+    # RAID0/linear and inactive arrays do not offer a consistency-check control.
+    (md / 'sync_action').read_text()
+    print('Selected ' + saved['device'] + ' UUID=' + saved['uuid'])
+    print('Checks can degrade read/write performance. They are not backups or repairs; kernel error handling may still write.')
+    if input('Schedule monthly checks of this array only (may run immediately)? Type yes: ').strip() != 'yes':
+        raise ValueError('Cancelled; nothing enabled or written.')
+    current, _ = identity(saved['device'])
+    if current != saved:
+        raise ValueError('Array identity changed during confirmation.')
+    with os.fdopen(os.open(CONFIG, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600), 'w') as stream:
+        json.dump(saved, stream)
+        stream.write('\n')
+    command('systemctl', 'daemon-reload')
+    command('systemctl', 'enable', '--now', TIMER)
+    print('Disable scheduling: sudo systemctl disable --now ' + TIMER)
+    print('Stopping the service does not stop a kernel check. Review journalctl -u raid-maintenance.service.')
+    print('Backups are NOT coordinated until they share /run/raid-maintenance.lock and check sysfs; legacy jobs are unchanged.')
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--run', action='store_true', help='check only the recorded array, if idle')
+    args = parser.parse_args()
+    if os.geteuid() != 0:
+        parser.error('Run as root (sudo).')
+    try:
+        if args.run:
+            check()
+        else:
+            enroll()
+    except (OSError, ValueError, TypeError, subprocess.CalledProcessError, EOFError) as error:
+        print('RAID maintenance refused/failed: ' + str(error), file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

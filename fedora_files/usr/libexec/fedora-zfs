@@ -1,0 +1,253 @@
+#!/usr/bin/python3 -I
+"""Narrow opt-in maintenance for existing ZFS storage, not a storage manager."""
+import fcntl
+import json
+import os
+from pathlib import Path
+import re
+import shlex
+import stat
+import subprocess
+import sys
+
+JOBS = Path('/etc/fedora-zfs/jobs')
+UNITS = Path('/etc/systemd/system')
+SHARE = Path('/usr/share/fedora-zfs')
+ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LC_ALL': 'C', 'HOME': '/root'}
+SSH = ['-F', '/dev/null', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
+       '-o', 'ClearAllForwardings=yes', '-o', 'PermitLocalCommand=no', '-o', 'UpdateHostKeys=no']
+
+
+def command(args):
+    return subprocess.run(args, env=ENV, check=True, text=True, capture_output=True).stdout.strip()
+
+
+def require(condition, message):
+    if not condition:
+        raise ValueError(message)
+
+
+def dataset(value):
+    require(isinstance(value, str) and len(value) <= 200 and
+            re.fullmatch(r'[A-Za-z][A-Za-z0-9_-]*(/[A-Za-z0-9_][A-Za-z0-9_-]*)*', value),
+            'Use simple pool/dataset names: letters, digits, underscores and hyphens only')
+    return value
+
+
+def validate(job):
+    require(job['kind'] in ('snapshots', 'scrub', 'replication'), 'Invalid operation')
+    source = dataset(job['source'])
+    require(job['schedule'] in ('hourly', 'daily', 'weekly'), 'Invalid schedule')
+    if job['kind'] == 'scrub':
+        require('/' not in source, 'Select a pool, not a dataset')
+    if job['kind'] == 'snapshots':
+        require(all(type(job[k]) is int and 0 <= job[k] <= 10000
+                    for k in ('hourly', 'daily', 'weekly')), 'Invalid retention')
+        require(any(job[k] for k in ('hourly', 'daily', 'weekly')), 'Select nonzero retention')
+        require(not job['hourly'] or job['schedule'] == 'hourly', 'Hourly retention needs hourly execution')
+        require(not job['daily'] or job['schedule'] != 'weekly', 'Daily retention needs daily or hourly execution')
+    if job['kind'] == 'replication':
+        target = dataset(job['target'])
+        require('/' in target, 'Destination must not be a pool root')
+        require(source != target and not source.startswith(target + '/') and
+                not target.startswith(source + '/'), 'Source/destination equality or ancestor cycle')
+        remote = job['remote']
+        require(remote == '' or (isinstance(remote, str) and len(remote) <= 253 and
+                re.fullmatch(r'[a-z_][a-z0-9_-]*@[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*', remote)),
+                'SSH destination must be a simple user@host (no options, IPv6 or shell syntax)')
+
+
+def query(job, args, target=False):
+    if target and job.get('remote'):
+        # SSH joins argv into a remote shell command; preserve argument boundaries.
+        return command(['ssh', *SSH, job['remote'], shlex.join(args)])
+    return command(args)
+
+
+def preflight(job):
+    validate(job)
+    source = job['source']
+    if job['kind'] == 'scrub':
+        require(command(['zpool', 'list', '-H', '-o', 'health', source]) == 'ONLINE',
+                'Pool must already be imported and ONLINE')
+        return
+    require(command(['zfs', 'list', '-H', '-o', 'type', source]) == 'filesystem',
+            'Only existing filesystem datasets are supported')
+    if job['kind'] != 'replication':
+        return
+    target = job['target']
+    require(query(job, ['zfs', 'list', '-H', '-o', 'type', target], True) == 'filesystem',
+            'Destination must be an existing filesystem')
+    # Compare pool GUIDs even over SSH: aliases must not bypass cycle protection.
+    local_guid = command(['zpool', 'get', '-H', '-o', 'value', 'guid', source.split('/')[0]])
+    remote_guid = query(job, ['zpool', 'get', '-H', '-o', 'value', 'guid', target.split('/')[0]], True)
+    require(local_guid.isdigit() and remote_guid.isdigit() and local_guid != remote_guid,
+            'Replication requires distinct pools, including across SSH aliases')
+    for prop, expected in [('readonly', 'on'), ('mounted', 'no'), ('receive_resume_token', '-')]:
+        require(query(job, ['zfs', 'get', '-H', '-o', 'value', prop, target], True) == expected,
+                'Destination must be readonly, unmounted, and have no interrupted receive')
+    require(query(job, ['zfs', 'list', '-H', '-r', '-o', 'name', target], True) == target,
+            'Destination must have no child datasets')
+    rows = query(job, ['zfs', 'list', '-H', '-p', '-d', '1', '-t', 'snapshot',
+                       '-o', 'name,guid', '-s', 'createtxg', target], True).splitlines()
+    require(bool(rows), 'Seed destination manually first; no matching snapshot exists')
+    latest, guid = rows[-1].split('\t')
+    require(latest.startswith(target + '@') and guid.isdigit(), 'Unexpected destination snapshot')
+    snap = latest.split('@', 1)[1]
+    require(re.fullmatch(r'[A-Za-z0-9_][A-Za-z0-9_.:-]*', snap), 'Unsupported snapshot name')
+    require(command(['zfs', 'get', '-H', '-o', 'value', 'guid', source + '@' + snap]) == guid,
+            'Latest destination snapshot must match the source GUID')
+    require(query(job, ['zfs', 'get', '-H', '-p', '-o', 'value', 'written@' + snap, target], True) == '0',
+            'Destination has writes after its latest snapshot; refusing replication')
+
+
+def secure(path, directory=False):
+    info = path.lstat()
+    require(info.st_uid == 0 and stat.S_IMODE(info.st_mode) == (0o700 if directory else 0o600)
+            and (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)),
+            f'Unsafe ownership, type or permissions: {path}')
+
+
+def conflicts(name, job):
+    require(not os.path.lexists(JOBS / name) and
+            not os.path.lexists(UNITS / f'fedora-zfs-{name}.timer'),
+            'Enrollment already exists; refusing overwrite (inspect partial enrollment manually)')
+    if not os.path.lexists(JOBS):
+        return
+    secure(JOBS.parent, True)
+    secure(JOBS, True)
+    for folder in JOBS.iterdir():
+        secure(folder, True)
+        secure(folder / 'job.json')
+        other = json.loads((folder / 'job.json').read_text())
+        validate(other)
+        require((job['kind'], job['source']) != (other['kind'], other['source']),
+                'This source already has an enrollment of this kind')
+        # Conservatively compare names even across hosts. A replication target
+        # cannot also be a source/target of another job, preventing chained cycles
+        # and competing snapshot/receive policies without managing a storage graph.
+        for receiver, peer in ((job, other), (other, job)):
+            if receiver['kind'] != 'replication' or peer['kind'] == 'scrub':
+                continue
+            for endpoint in (peer['source'], *([peer['target']] if peer['kind'] == 'replication' else [])):
+                target = receiver['target']
+                require(target != endpoint and not target.startswith(endpoint + '/') and
+                        not endpoint.startswith(target + '/'), 'Overlapping replication enrollment')
+
+
+def run(name):
+    for path in (JOBS.parent, JOBS, JOBS / name):
+        secure(path, True)
+    folder = JOBS / name
+    secure(folder / 'job.json')
+    # Opening the trusted directory itself provides a per-job lock without a lockfile.
+    fd = os.open(folder, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        job = json.loads((folder / 'job.json').read_text())
+        preflight(job)
+        if job['kind'] == 'scrub':
+            command(['zpool', 'scrub', job['source']])
+        elif job['kind'] == 'snapshots':
+            for filename in ('sanoid.conf', 'sanoid.defaults.conf'):
+                secure(folder / filename)
+            command(['sanoid', '--cron', '--configdir=' + str(folder),
+                     '--cache-dir=/var/cache/fedora-zfs/' + name,
+                     '--run-dir=/run/fedora-zfs/' + name])
+        else:
+            args = ['syncoid', '--no-rollback', '--no-sync-snap', '--no-stream',
+                    '--no-resume', '--no-clone-handling', '--no-privilege-elevation',
+                    '--recvoptions=u o readonly=on', '--compress=none']
+            if job['remote']:
+                args += ['--sshconfig=/dev/null', '--sshoption=BatchMode=yes',
+                         '--sshoption=StrictHostKeyChecking=yes',
+                         '--sshoption=ClearAllForwardings=yes', '--sshoption=PermitLocalCommand=no',
+                         '--sshoption=UpdateHostKeys=no']
+            command([*args, job['source'], (job['remote'] + ':' if job['remote'] else '') + job['target']])
+    finally:
+        os.close(fd)
+
+
+def enroll(name):
+    require(not os.path.lexists(JOBS / name) and
+            not os.path.lexists(UNITS / f'fedora-zfs-{name}.timer'),
+            'Enrollment already exists; refusing overwrite (inspect partial enrollment manually)')
+    job = {'kind': input('Operation [snapshots/scrub/replication]: ').strip(),
+           'source': input('Existing source dataset (pool for scrub): ').strip(),
+           'schedule': input('Schedule [hourly/daily/weekly]: ').strip()}
+    if job['kind'] == 'snapshots':
+        print('Sanoid will create AND prune snapshots for this dataset only. No child recursion.')
+        for key in ('hourly', 'daily', 'weekly'):
+            job[key] = int(input(f'{key} snapshots to retain (0 disables this tier): '))
+    elif job['kind'] == 'replication':
+        job['target'] = input('Existing seeded destination dataset: ').strip()
+        job['remote'] = input('SSH user@host (empty for local): ').strip()
+    preflight(job)
+    conflicts(name, job)
+    print(json.dumps(job, indent=2))
+    print('Snapshots are crash-consistent, not guest-coordinated VM backups.\n'
+          'Shared hardware can lose both copies; keep independent offline/remote backups.\n'
+          'Activation may run immediately. No keys or host trust will be configured.\n'
+          'Replication skips intermediate snapshots and never manages destination retention.')
+    if input('Type ENROLL to write configuration and enable this timer: ') != 'ENROLL':
+        print('Cancelled; no configuration or storage writes performed.')
+        return
+    preflight(job)
+    os.umask(0o077)
+    for path in (JOBS.parent, JOBS):
+        path.mkdir(mode=0o700, exist_ok=True)
+        secure(path, True)
+    fd = os.open(JOBS, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        conflicts(name, job)
+        folder = JOBS / name
+        folder.mkdir(mode=0o700)
+        with (folder / 'job.json').open('x') as stream:
+            json.dump(job, stream, indent=2)
+        if job['kind'] == 'snapshots':
+            with (folder / 'sanoid.conf').open('x') as stream:
+                stream.write((SHARE / 'sanoid.conf.in').read_text().format(**job))
+            with (folder / 'sanoid.defaults.conf').open('x') as stream:
+                stream.write(Path('/usr/share/sanoid/sanoid.defaults.conf').read_text())
+            command(['sanoid', '--readonly', '--configdir=' + str(folder),
+                     '--cache-dir=/var/cache/fedora-zfs/' + name,
+                     '--run-dir=/run/fedora-zfs/' + name])
+        timer = f'fedora-zfs-{name}.timer'
+        with (UNITS / timer).open('x') as stream:
+            stream.write((SHARE / 'job.timer.in').read_text().format(name=name, **job))
+    finally:
+        os.close(fd)
+    command(['systemctl', 'daemon-reload'])
+    command(['systemctl', 'enable', '--now', timer])
+    print(f'Enrolled. Stop scheduling with: sudo systemctl disable --now {timer}')
+
+
+def main():
+    require(len(sys.argv) >= 2, 'Usage: fedora-zfs status | enroll NAME | run NAME')
+    if sys.argv[1:] == ['status']:
+        for args in (['lsblk', '-f'], ['findmnt', '-r'], ['zpool', 'status'],
+                     ['zfs', 'list', '-o', 'name,type,used,available,mountpoint']):
+            print('$ ' + ' '.join(args), flush=True)
+            try:
+                print(command(args))
+            except (OSError, subprocess.CalledProcessError) as error:
+                print(str(error), file=sys.stderr)
+        return
+    require(os.geteuid() == 0, 'Root required for enrollment and scheduled execution')
+    require(len(sys.argv) == 3 and sys.argv[1] in ('enroll', 'run') and
+            re.fullmatch(r'[a-z][a-z0-9-]{0,39}', sys.argv[2]), 'Invalid operation or job name')
+    if sys.argv[1] == 'enroll':
+        enroll(sys.argv[2])
+    else:
+        run(sys.argv[2])
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (ValueError, KeyError, OSError, subprocess.CalledProcessError) as error:
+        print(f'Refusing/failed: {error}', file=sys.stderr)
+        if isinstance(error, subprocess.CalledProcessError) and error.stderr:
+            print(error.stderr, file=sys.stderr)
+        sys.exit(1)

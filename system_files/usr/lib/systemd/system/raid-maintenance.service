@@ -1,0 +1,14 @@
+[Unit]
+Description=Check the explicitly selected md array without requesting repair
+ConditionPathExists=/etc/raid-maintenance.json
+
+[Service]
+Type=oneshot
+User=root
+ExecStart=/usr/bin/setup-raid-maintenance --run
+TimeoutStartSec=infinity
+Nice=19
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+# Kernel md check IO does not inherit the helper's scheduling priority.
+# sysfs must remain writable; do not enable ProtectKernelTunables here.

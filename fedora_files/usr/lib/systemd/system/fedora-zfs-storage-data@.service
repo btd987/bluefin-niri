@@ -1,0 +1,13 @@
+[Unit]
+Description=Enrolled existing ZFS shared storage (%i)
+After=local-fs.target zfs-import.target zfs-mount.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/python3 -I /usr/libexec/fedora-zfs-storage run %i data
+UMask=0077
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

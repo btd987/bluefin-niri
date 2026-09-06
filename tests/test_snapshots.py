@@ -10,7 +10,7 @@ import unittest
 
 RECIPE_FILE = (
     Path(__file__).resolve().parents[1]
-    / "system_files/usr/share/ublue-os/just/60-custom.just"
+    / "system_files/usr/share/niri-system/justfile"
 )
 RECIPE = textwrap.dedent(
     RECIPE_FILE.read_text().split("setup-snapshots:\n", 1)[1].split("\n\n", 1)[0]

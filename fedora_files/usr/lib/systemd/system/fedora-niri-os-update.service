@@ -1,0 +1,10 @@
+[Unit]
+Description=Stage Fedora Niri OS updates without rebooting
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=/run/ostree-booted
+
+[Service]
+Type=oneshot
+# No --apply: the deployment becomes active at the next user-initiated reboot.
+ExecStart=/usr/bin/bootc upgrade

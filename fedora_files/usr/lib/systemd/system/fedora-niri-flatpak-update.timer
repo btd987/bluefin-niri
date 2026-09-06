@@ -1,0 +1,10 @@
+[Unit]
+Description=Update system-wide Flatpaks every six hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:00:00
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

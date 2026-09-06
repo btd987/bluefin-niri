@@ -1,0 +1,10 @@
+[{source}]
+recursive = no
+frequently = 0
+hourly = {hourly}
+daily = {daily}
+weekly = {weekly}
+monthly = 0
+yearly = 0
+autosnap = yes
+autoprune = yes

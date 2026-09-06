@@ -14,7 +14,6 @@ jobs:
       matrix:
         package:
           - bluefin-niri
-          - bluefin-niri-nvidia
           - bazzite-niri
           - bazzite-niri-nvidia
 

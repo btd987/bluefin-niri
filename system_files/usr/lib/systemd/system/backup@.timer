@@ -1,0 +1,10 @@
+[Unit]
+Description=Opt-in Borg backup schedule (%i)
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=10m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

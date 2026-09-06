@@ -1,0 +1,44 @@
+# Unpublished RPM and runtime proof only: no publication integration.
+# Source integrity and maintainer signature are checked before extraction.
+# This is not a Secure Boot acceptance test.
+FROM quay.io/fedora/fedora-bootc:44@sha256:d6481b291e960abb02a346294dcac2818df8dfe2b1bc51d1ae8fa53a15718756 AS zfs-source
+RUN dnf5 -y --exclude='kernel*' install curl tar gzip gnupg2 && dnf5 clean all
+WORKDIR /build
+COPY scripts/verify-zfs-source.sh /build/verify-zfs-source.sh
+RUN curl --fail --location --proto '=https' --proto-redir '=https' \
+        https://github.com/openzfs/zfs/releases/download/zfs-2.4.4/zfs-2.4.4.tar.gz \
+        --output zfs-2.4.4.tar.gz && \
+    printf '%s  %s\n' \
+        2a3c70d55a37cc71618a95a60e81ad66530201eb118d37741dc92efcf848c8b1 \
+        zfs-2.4.4.tar.gz | sha256sum --check --strict && \
+    bash /build/verify-zfs-source.sh && \
+    tar -xzf zfs-2.4.4.tar.gz
+
+FROM zfs-source AS zfs-prerequisites
+RUN dnf5 -y --exclude=kernel,kernel-core,kernel-modules,kernel-modules-core,kernel-modules-extra install \
+        gcc make autoconf automake libtool rpm-build redhat-rpm-config \
+        elfutils-libelf-devel ncompress zlib-devel libuuid-devel libblkid-devel \
+        systemd-devel libattr-devel openssl-devel libtirpc-devel libaio-devel \
+        python3-devel python3-setuptools python3-cffi python3-packaging \
+        libffi-devel kmod openssl cpio diffutils patch which && dnf5 clean all
+RUN set -eu; kernel=$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel-core); \
+    dnf5 -y install "kernel-devel-uname-r = $kernel" && \
+    test "$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel-core)" = "$kernel" && \
+    test -s "/usr/src/kernels/$kernel/Module.symvers"
+
+FROM zfs-prerequisites AS zfs-builder
+COPY scripts/build-zfs-rpms.sh /build/build-zfs-rpms.sh
+# Both inputs are mounted, never COPY'd. Supply an existing unencrypted PEM key
+# and its public X.509 DER certificate. Never give production keys to PR builds.
+RUN --mount=type=secret,id=zfs_signing_key,required=true \
+    --mount=type=secret,id=zfs_signing_cert,required=true \
+    bash /build/build-zfs-rpms.sh
+
+FROM scratch AS zfs-rpms
+COPY --from=zfs-builder /out/ /
+
+FROM quay.io/fedora/fedora-bootc:44@sha256:d6481b291e960abb02a346294dcac2818df8dfe2b1bc51d1ae8fa53a15718756 AS zfs-runtime
+# Read-only build mount keeps RPM artifacts out of runtime layers.
+COPY scripts/install-zfs-rpms.sh scripts/validate-zfs.sh /tmp/zfs-runtime/
+RUN --mount=type=bind,from=zfs-builder,source=/out,target=/run/zfs-rpms \
+    bash /tmp/zfs-runtime/install-zfs-rpms.sh

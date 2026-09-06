@@ -1,0 +1,2 @@
+disable fedora-zfs-storage-data@.service
+disable fedora-zfs-storage-home@.service

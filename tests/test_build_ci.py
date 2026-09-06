@@ -30,6 +30,8 @@ def block(text, header):
 
 
 WORKFLOW = (Path(__file__).resolve().parents[1] / ".github/workflows/build.yml").read_text()
+CLEANUP = (Path(__file__).resolve().parents[1] / ".github/workflows/cleanup.yml").read_text()
+CANDIDATE = (Path(__file__).resolve().parents[1] / ".github/workflows/fedora-candidate.yml").read_text()
 BUILD = block(WORKFLOW, "  build:")
 PUBLISH = block(WORKFLOW, "  publish:")
 
@@ -93,12 +95,16 @@ class BuildCITests(unittest.TestCase):
         )
         self.assertEqual(matrix, [
             ("ghcr.io/ublue-os/bluefin-dx", "bluefin-niri", "stable", "stable-daily"),
-            ("ghcr.io/ublue-os/bluefin-dx-nvidia-open", "bluefin-niri-nvidia", "stable", "stable-daily"),
             ("ghcr.io/ublue-os/bazzite", "bazzite-niri", "stable", "latest"),
             ("ghcr.io/ublue-os/bazzite-nvidia", "bazzite-niri-nvidia", "stable", "latest"),
         ])
         names = re.search(r"image_name: \[(.+)\]", PUBLISH).group(1).split(", ")
         self.assertEqual(names, [row[1] for row in matrix])
+        packages = block(CLEANUP, "        package:")
+        self.assertEqual(re.findall(r"^ +\- (\S+)$", packages, re.M), names)
+        for excluded in ("bluefin-niri-nvidia", "fedora-44-niri", "fedora-niri"):
+            self.assertNotIn(excluded, WORKFLOW)
+            self.assertNotIn(excluded, CLEANUP)
         for _, name, stable, daily in matrix:
             for event, schedule, channel, expected in (
                 ("pull_request", "", "", "stable-daily"),
@@ -171,8 +177,110 @@ skopeo() {
                     if tag != valid_tag or fail == "tag":
                         self.assertEqual(result.stderr.splitlines(), ["inspect docker://example/base:stable"])
 
+    def test_cleanup_retention(self):
+        self.assertIn("tags.includes('stable') || tags.includes('stable-daily')", CLEANUP)
+        self.assertIn("...stableDated.slice(5)", CLEANUP)
+        self.assertIn("...dailyDated.slice(7)", CLEANUP)
+
+    def test_full_standard_suite_with_dependencies_before_builds(self):
+        for job in (block(WORKFLOW, "  validate:"), block(CANDIDATE, "  candidate:")):
+            install = block(job, "      - name: Install test dependencies")
+            tests = block(job, "      - name: Run standard unit tests")
+            self.assertIn("sudo apt-get update && sudo apt-get install -y python3-yaml", install)
+            self.assertIn('cargo install --locked --version 1.57.0 just --root "$RUNNER_TEMP/just"', install)
+            self.assertIn('echo "$RUNNER_TEMP/just/bin" >> "$GITHUB_PATH"', install)
+            self.assertIn("command -v just", tests)
+            self.assertIn("/usr/bin/python3 -c 'import yaml'", tests)
+            self.assertIn("/usr/bin/python3 -m unittest discover -s tests -v", tests)
+            self.assertNotIn(" -p ", tests)
+            self.assertNotIn("continue-on-error", job)
+            self.assertLess(job.index(install), job.index(tests))
+            self.assertNotIn("BACKUP_REAL_CONTAINER", job)
+            self.assertNotIn("NIRIUS_ARTIFACT_DIR", job)
+            self.assertNotIn("NIRI_TEST_IMAGE", job)
+        self.assertLess(CANDIDATE.index("      - name: Run standard unit tests"),
+                        CANDIDATE.index("      - name: Require supplied signing inputs"))
+
+    def test_candidate_is_separate_and_nonpublishing(self):
+        self.assertEqual(re.findall(r"^  (\w+):", block(CANDIDATE, "on:"), re.M),
+                         ["workflow_dispatch"])
+        self.assertEqual(re.findall(r"^  (\w+):", block(CANDIDATE, "jobs:"), re.M),
+                         ["candidate"])
+        job = block(CANDIDATE, "  candidate:")
+        self.assertIn("    if: github.ref == 'refs/heads/main'\n", job)
+        self.assertIn("    environment: fedora-production-validation\n", job)
+        for text, header in ((CANDIDATE, "permissions:"), (job, "    permissions:")):
+            self.assertEqual(block(text, header).strip(), "contents: read")
+        self.assertIn("          persist-credentials: false", job)
+        for forbidden in ("packages: write", "upload-artifact@", "login@", "podman push",
+                          "podman save", "skopeo copy", "type: boolean", "continue-on-error:",
+                          "localhost/zfs-rpms-test-proof", "/tmp/opencode", "openssl req"):
+            self.assertNotIn(forbidden, CANDIDATE)
+        for name in ("signing_key_secret", "signing_cert_secret", "rpm_signing_key_secret"):
+            self.assertIn("        required: true", block(CANDIDATE, f"      {name}:"))
+            self.assertIn("${{ secrets[inputs." + name + "] }}", CANDIDATE)
+        self.assertIn("        required: true", block(CANDIDATE, "      rpm_signing_fingerprint_variable:"))
+        self.assertIn("${{ vars[inputs.rpm_signing_fingerprint_variable] }}", job)
+        self.assertIn("podman build --no-cache -f Containerfile.zfs-sign", job)
+        self.assertIn("podman build --no-cache -f Containerfile.zfs-runtime", job)
+        self.assertEqual(re.findall(r"podman build (?:--no-cache )?-f (\S+)", job), [
+            "Containerfile.zfs", "Containerfile.zfs-sign", "Containerfile.zfs-runtime", "Containerfile.nirius",
+            "Containerfile.fedora",
+        ])
+        for argument in ("--target zfs-rpms", "ZFS_RPM_IMAGE=localhost/zfs-rpms:candidate",
+                         "ZFS_RPM_IMAGE=localhost/zfs-signed-rpms:candidate",
+                         "ZFS_RPM_TRUST_MODE=verified",
+                         "ZFS_RPM_SIGNING_FINGERPRINT=$RPM_SIGNING_FINGERPRINT",
+                         "id=zfs_rpm_signing_key,src=$signing/rpm-key.asc",
+                         "BASE_IMAGE=localhost/zfs-runtime:candidate",
+                         "NIRIUS_IMAGE=localhost/nirius-artifact:candidate",
+                         "id=zfs_signing_key,src=$signing/key.pem",
+                         "id=zfs_signing_cert,src=$signing/cert.der"):
+            self.assertIn(argument, job)
+        self.assertIn("protected credentials/enrollment and booted verification remain release gates.", job)
+
+    def test_candidate_missing_signing_inputs_fail_closed(self):
+        for name in ("Require supplied signing inputs", "Build unpublished Fedora candidate"):
+            step = block(CANDIDATE, f"      - name: {name}")
+            shell = textwrap.dedent(block(step, "        run: |"))
+            valid = dict(SIGNING_KEY="fixture", SIGNING_CERT="Zml4dHVyZQ==",
+                         RPM_SIGNING_KEY="fixture", RPM_SIGNING_FINGERPRINT="A" * 40)
+            cases = [{**valid, key: ""} for key in valid]
+            cases += [{**valid, "RPM_SIGNING_FINGERPRINT": value} for value in ("A" * 16, "a" * 40)]
+            for inputs in cases:
+                with self.subTest(step=name, inputs=inputs):
+                    result, _ = run(shell, **inputs)
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertNotIn("unbound variable", result.stderr)
+
+    def test_candidate_build_sequence_with_mocked_builds(self):
+        step = block(CANDIDATE, "      - name: Build unpublished Fedora candidate")
+        shell = textwrap.dedent(block(step, "        run: |"))
+        mock = '''
+openssl() { return 0; }
+podman() {
+  [[ -s "$signing/key.pem" && -s "$signing/cert.der" && -s "$signing/rpm-key.asc" ]] || return 98
+  [[ ! -v SIGNING_KEY && ! -v SIGNING_CERT && ! -v RPM_SIGNING_KEY ]] || return 99
+  printf '%s\\n' "$*"
+  [[ "$*" != *"$FAIL_BUILD"* ]]
+}
+'''
+        for failure in ("no-failure", "Containerfile.zfs --target", "Containerfile.zfs-sign", "Containerfile.fedora"):
+            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
+                summary = Path(tmp) / "summary"
+                result, _ = run(mock + shell, SIGNING_KEY="fixture", SIGNING_CERT="Zml4dHVyZQ==",
+                                RPM_SIGNING_KEY="fixture", RPM_SIGNING_FINGERPRINT="A" * 40,
+                                RUNNER_TEMP=tmp, GITHUB_STEP_SUMMARY=str(summary), FAIL_BUILD=failure)
+                self.assertEqual(result.returncode == 0, failure == "no-failure", result.stderr)
+                self.assertEqual(summary.exists(), failure == "no-failure")
+                self.assertEqual(list(Path(tmp).glob("fedora-signing.*")), [])
+                if failure == "no-failure":
+                    self.assertEqual(len(result.stdout.splitlines()), 5)
+                elif failure == "Containerfile.zfs --target":
+                    self.assertEqual(len(result.stdout.splitlines()), 1)
+
     def test_shell_syntax(self):
-        scripts = re.findall(r"^        run: \|\n((?:          .*\n|\n)+)", WORKFLOW, re.M)
+        scripts = re.findall(r"^        run: \|\n((?:          .*\n|\n)+)", WORKFLOW + CANDIDATE, re.M)
         self.assertGreaterEqual(len(scripts), 5)
         for shell in scripts:
             with self.subTest(script=shell.splitlines()[0]):

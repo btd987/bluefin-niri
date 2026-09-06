@@ -1,0 +1,11 @@
+[Unit]
+Description=Optional monthly check of the explicitly selected md array
+ConditionPathExists=/etc/raid-maintenance.json
+
+[Timer]
+OnCalendar=monthly
+RandomizedDelaySec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
