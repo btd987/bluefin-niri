@@ -1,0 +1,116 @@
+name: Fedora Niri Testing
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "17 13 * * *"  # Daily unsigned hardware-testing image (UTC)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y python3-yaml
+          # Noble's Just 1.21 lacks group and positional-arguments attributes.
+          cargo install --locked --version 1.57.0 just --root "$RUNNER_TEMP/just"
+          echo "$RUNNER_TEMP/just/bin" >> "$GITHUB_PATH"
+
+      - name: Run standard unit tests
+        run: |
+          command -v just
+          /usr/bin/python3 -c 'import yaml'
+          /usr/bin/python3 -m unittest discover -s tests -v
+
+      - name: Maximize build space
+        uses: ublue-os/remove-unwanted-software@v9
+
+      - name: Build Fedora testing image
+        run: |
+          set -euo pipefail
+          podman build -f Containerfile.zfs --target zfs-rpms \
+            --build-arg ZFS_BUILD_MODE=unsigned-testing \
+            -t localhost/zfs-rpms:testing .
+          podman build --no-cache -f Containerfile.zfs-runtime \
+            --build-arg ZFS_RPM_IMAGE=localhost/zfs-rpms:testing \
+            --build-arg ZFS_RPM_TRUST_MODE=unsigned-testing \
+            -t localhost/zfs-runtime:testing .
+          podman build -f Containerfile.nirius -t localhost/nirius-artifact:testing .
+          podman build -f Containerfile.fedora \
+            --build-arg BASE_IMAGE=localhost/zfs-runtime:testing \
+            --build-arg NIRIUS_IMAGE=localhost/nirius-artifact:testing \
+            --build-arg ZFS_BUILD_MODE=unsigned-testing \
+            -t localhost/fedora-niri:testing .
+          printf '%s\n' \
+            'Fedora testing assembly and container checks completed on this runner.' \
+            'Unsigned RPMs and ZFS modules: hardware testing requires Secure Boot disabled.' \
+            'Boot, storage, and update/rollback acceptance are not established by this build.' \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Export testing image
+        if: github.repository == 'btd987/bluefin-niri' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/release"
+          podman save --format oci-archive --output "$RUNNER_TEMP/release/image.tar" localhost/fedora-niri:testing
+          printf '%s\n' testing "testing-$(date -u +%Y%m%d)" > "$RUNNER_TEMP/release/tags.txt"
+
+      - name: Upload testing image
+        if: github.repository == 'btd987/bluefin-niri' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@v7
+        with:
+          name: fedora-niri-testing
+          path: ${{ runner.temp }}/release/
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: github.repository == 'btd987/bluefin-niri' && github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - name: Maximize publish space
+        uses: ublue-os/remove-unwanted-software@v9
+
+      # No checkout or image execution in the write-token job.
+      - name: Download testing image
+        uses: actions/download-artifact@v8
+        with:
+          name: fedora-niri-testing
+          path: ${{ runner.temp }}/release/
+
+      - name: Login to GHCR
+        uses: redhat-actions/podman-login@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push to GHCR
+        run: |
+          set -euo pipefail
+          while IFS= read -r TAG; do
+            [[ "$TAG" == testing || "$TAG" =~ ^testing-[0-9]{8}$ ]]
+            skopeo copy "oci-archive:$RUNNER_TEMP/release/image.tar" "docker://ghcr.io/btd987/fedora-niri:${TAG}"
+          done < "$RUNNER_TEMP/release/tags.txt"

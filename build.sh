@@ -372,7 +372,7 @@ EOF
     mise --version
 )
 
-# Unpublished foundation; production dispatch remains gated on booted validation.
+# Fedora testing foundation; booted hardware acceptance is separate.
 install_fedora_niri_foundation() {
     # Require inherited bootc tooling used by the shared recipes.
     rpm -q bootc rpm-ostree
@@ -435,7 +435,7 @@ install_fedora_niri_foundation() {
     systemctl preset bootc-fetch-apply-updates.timer fedora-niri-os-update.timer fedora-niri-flatpak-update.timer
     # Shared ThinkPad defaults must not enable fan control on arbitrary hardware.
     systemctl disable thinkfan.service
-    # Fedora proof storage scheduling is opt-in, including after system presets.
+    # Fedora storage scheduling is opt-in, including after system presets.
     mkdir -p /usr/lib/systemd/system-preset
     printf '%s\n' 'disable snapper-timeline.timer' 'disable snapper-cleanup.timer' \
         > /usr/lib/systemd/system-preset/00-fedora-niri-snapshots.preset
@@ -451,10 +451,6 @@ case "${VARIANT}" in
         install_ublue_niri_noctalia
         ;;
     fedora-niri)
-        echo "fedora-niri is not enabled: exact-kernel ZFS integration and validation are pending" >&2
-        exit 1
-        ;;
-    fedora-niri-proof)
         install_fedora_niri_foundation
         ;;
     *)

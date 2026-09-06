@@ -8,23 +8,32 @@ fail() { printf 'ZFS RPM build failed: %s\n' "$*" >&2; exit 1; }
 
 [[ $# == 0 ]] || fail 'no arguments expected; run using Containerfile.zfs'
 [[ -f /run/.containerenv || -f /.dockerenv ]] || fail 'container required'
+mode=${ZFS_BUILD_MODE-signed}
+case "$mode" in
+    signed|unsigned-testing) ;;
+    *) fail 'expected signed or unsigned-testing build mode' ;;
+esac
 key=/run/secrets/zfs_signing_key
 cert=/run/secrets/zfs_signing_cert
-[[ -s $key && -r $key ]] || fail 'secret-mounted signing key required'
-[[ -s $cert && -r $cert ]] || fail 'supplied public DER certificate required'
-openssl x509 -inform DER -in "$cert" -noout >/dev/null
-key_pub=$(openssl pkey -in "$key" -passin pass: -pubout -outform DER | sha256sum)
-cert_pub=$(openssl x509 -inform DER -in "$cert" -pubkey -noout |
-    openssl pkey -pubin -outform DER | sha256sum)
-[[ $key_pub == "$cert_pub" ]] || fail 'signing key and certificate do not match'
-sig_key=$(openssl x509 -inform DER -in "$cert" -noout -ext subjectKeyIdentifier |
-    sed -n '2s/^[[:space:]]*//p')
-[[ $sig_key =~ ^[[:xdigit:]]{2}(:[[:xdigit:]]{2})+$ ]] || fail 'certificate needs a subject key identifier'
-# sign-file's CMS issuer-and-serial signer ID is exposed as modinfo sig_key.
-serial=$(openssl x509 -inform DER -in "$cert" -noout -serial)
-serial=${serial#serial=}
-[[ $serial =~ ^([[:xdigit:]]{2})+$ ]] || fail 'invalid certificate serial'
-sig_key=$(printf '%s' "$serial" | sed 's/../&:/g; s/:$//')
+if [[ $mode == signed ]]; then
+    [[ -s $key && -r $key ]] || fail 'secret-mounted signing key required'
+    [[ -s $cert && -r $cert ]] || fail 'supplied public DER certificate required'
+    openssl x509 -inform DER -in "$cert" -noout >/dev/null
+    key_pub=$(openssl pkey -in "$key" -passin pass: -pubout -outform DER | sha256sum)
+    cert_pub=$(openssl x509 -inform DER -in "$cert" -pubkey -noout |
+        openssl pkey -pubin -outform DER | sha256sum)
+    [[ $key_pub == "$cert_pub" ]] || fail 'signing key and certificate do not match'
+    sig_key=$(openssl x509 -inform DER -in "$cert" -noout -ext subjectKeyIdentifier |
+        sed -n '2s/^[[:space:]]*//p')
+    [[ $sig_key =~ ^[[:xdigit:]]{2}(:[[:xdigit:]]{2})+$ ]] || fail 'certificate needs a subject key identifier'
+    # sign-file's CMS issuer-and-serial signer ID is exposed as modinfo sig_key.
+    serial=$(openssl x509 -inform DER -in "$cert" -noout -serial)
+    serial=${serial#serial=}
+    [[ $serial =~ ^([[:xdigit:]]{2})+$ ]] || fail 'invalid certificate serial'
+    sig_key=$(printf '%s' "$serial" | sed 's/../&:/g; s/:$//')
+else
+    [[ ! -e $key && ! -e $cert ]] || fail 'unsigned-testing must not receive signing secrets'
+fi
 
 kernel=$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-core) || fail 'cannot query kernel-core'
 [[ $kernel =~ ^[[:alnum:]_+]+([.][[:alnum:]_+]+)*-[[:alnum:]_+]+([.][[:alnum:]_+]+)+$ ]] || fail 'expected exactly one installed kernel-core'
@@ -54,13 +63,15 @@ fi
 mkdir -p "$ksrc/certs"
 # Upstream __modsign_install_post signs after stripping. Only symlink the key;
 # it must never enter a source archive, RPM payload, or committed image layer.
-ln -s "$key" "$ksrc/certs/signing_key.pem"
-ln -s "$cert" "$ksrc/certs/signing_key.x509"
+if [[ $mode == signed ]]; then
+    ln -s "$key" "$ksrc/certs/signing_key.pem"
+    ln -s "$cert" "$ksrc/certs/signing_key.x509"
+fi
 cd /build/zfs-2.4.4
 ./configure --with-config=all --with-spec=generic \
     --with-linux="$ksrc" --with-linux-obj="$ksrc"
 # Disable kernel installation compression and RPM brp compression so the
-# upstream post-strip hook sees .ko files. Ship signed, uncompressed modules.
+# upstream post-strip hook sees .ko files. Ship uncompressed modules.
 # Stripped modules have no debug sources for RPM's automatic debug packages.
 make rpm-utils rpm-kmod INSTALL_MOD_STRIP=1 \
     CONFIG_MODULE_COMPRESS_ALL= CONFIG_MODULE_COMPRESS_NONE=y CONFIG_MODULE_SIG_ALL= \
@@ -92,8 +103,15 @@ for package in ./*.rpm; do
            -f /build/module-check/lib/modules/$kernel/extra/zfs/spl.ko ]] || fail 'missing module payload'
         for module in "${modules[@]}"; do
             [[ $(modinfo -F vermagic "$module") == "$kernel "* ]] || fail 'module kernel mismatch'
-            [[ $(modinfo -F sig_key "$module") == "$sig_key" ]] || fail 'module signing key mismatch'
-            [[ $(modinfo -F sig_hashalgo "$module") == sha256 ]] || fail 'missing SHA256 module signature'
+            if [[ $mode == unsigned-testing ]]; then
+                for field in signer sig_key sig_hashalgo; do
+                    value=$(modinfo -F "$field" "$module") || fail "cannot read module $field"
+                    [[ -z $value ]] || fail "unsigned-testing module has $field"
+                done
+            else
+                [[ $(modinfo -F sig_key "$module") == "$sig_key" ]] || fail 'module signing key mismatch'
+                [[ $(modinfo -F sig_hashalgo "$module") == sha256 ]] || fail 'missing SHA256 module signature'
+            fi
         done
     fi
     selected[$name]=1
@@ -102,7 +120,8 @@ done
 for name in zfs libnvpair3 libuutil3 libzfs7 libzpool7 "kmod-zfs-$kernel"; do
     [[ ${selected[$name]+present} ]] || fail "missing runtime RPM: $name"
 done
-cp "$cert" /out/zfs-signing-cert.der
+if [[ $mode == signed ]]; then cp "$cert" /out/zfs-signing-cert.der; fi
+printf '%s\n' "$mode" > /out/build-mode
 printf '%s\n' "$kernel" > /out/kernel-uname-r
-printf '%s\n' 'Unpublished proof RPMs. Source SHA256 and maintainer signature checked in zfs-source.' \
+printf '%s\n' "ZFS build mode: $mode. Source SHA256 and maintainer signature checked in zfs-source." \
     'Module signature metadata checked, not cryptographic authentication or Secure Boot acceptance. RPMs are not RPM-signed.' > /out/PROOF.txt

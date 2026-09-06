@@ -1,4 +1,4 @@
-"""Fedora candidate checks using extracted shell functions and mocks only."""
+"""Fedora testing checks using extracted shell functions and mocks only."""
 
 import os
 from pathlib import Path
@@ -105,12 +105,11 @@ class FedoraTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 42, result.stderr)
                 self.assertEqual(result.stdout.splitlines(), calls[:index + 1])
 
-    def test_candidate_fails_closed_without_running_either_installer(self):
+    def test_fedora_dispatch_uses_foundation(self):
         script = 'install_fedora_niri_foundation() { record foundation; }\n' + DISPATCH
         result = self.run_shell(script)
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(result.stdout, "")
-        self.assertIn("exact-kernel ZFS integration and validation are pending", result.stderr)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, "foundation\n")
 
     def test_existing_dispatch_uses_only_shared_installer(self):
         script = 'install_fedora_niri_foundation() { record foundation; }\n' + DISPATCH
@@ -121,14 +120,8 @@ class FedoraTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout, "shared\n")
 
-    def test_explicit_proof_dispatch(self):
-        script = 'install_fedora_niri_foundation() { record foundation; }\n' + DISPATCH
-        result = self.run_shell(script, variant="fedora-niri-proof")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout, "foundation\n")
-
     def test_unknown_and_retired_variants_remain_rejected(self):
-        for variant in ("unknown", "fedora-44-niri", "fedora-niri-nvidia", "bluefin-niri-nvidia"):
+        for variant in ("unknown", "fedora-niri-proof", "fedora-44-niri", "fedora-niri-nvidia", "bluefin-niri-nvidia"):
             with self.subTest(variant=variant):
                 result = self.run_shell(DISPATCH, variant=variant)
                 self.assertEqual(result.returncode, 1)

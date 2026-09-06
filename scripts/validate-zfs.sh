@@ -2,6 +2,7 @@
 # Build-time metadata validation only; does not prove cryptographic signature
 # validity, signing-key trust, or bootability. Run bootc lint separately.
 # Usage: bash scripts/validate-zfs.sh MAJOR.MINOR.PATCH AA:BB:...
+# Or: bash scripts/validate-zfs.sh MAJOR.MINOR.PATCH --unsigned-testing
 # The key ID must match modinfo sig_key exactly (including case).
 set -euo pipefail
 export LC_ALL=C
@@ -15,7 +16,7 @@ fail() {
 version=$1
 key=$2
 [[ $version =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || fail 'invalid ZFS version (expected MAJOR.MINOR.PATCH)'
-[[ $key =~ ^[[:xdigit:]]{2}(:[[:xdigit:]]{2})+$ ]] || fail 'invalid signing key ID (expected colon-separated hex bytes)'
+[[ $key == --unsigned-testing || $key =~ ^[[:xdigit:]]{2}(:[[:xdigit:]]{2})+$ ]] || fail 'invalid signing key ID (expected colon-separated hex bytes)'
 
 kernel=$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-core) || fail 'cannot query installed kernel-core'
 # A single safe token also rejects zero/multiple kernels and path traversal.
@@ -33,6 +34,10 @@ done <<< "$packages"
 for module in spl zfs; do
     for field in version vermagic filename signer sig_key sig_hashalgo; do
         value=$(modinfo -k "$kernel" -F "$field" "$module") || fail "$module: cannot read $field"
+        if [[ $key == --unsigned-testing && $field == sig* ]]; then
+            [[ -z $value ]] || fail "$module: unsigned-testing requires empty $field"
+            continue
+        fi
         [[ $value =~ [^[:space:]] && $value != *$'\n'* ]] || fail "$module: empty or multiline $field"
         case "$field" in
             version)

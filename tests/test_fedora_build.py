@@ -1,4 +1,4 @@
-"""Execute the Containerfile proof gate with mocked commands, never host writes."""
+"""Execute the Containerfile testing gates with mocked commands, never host writes."""
 import os
 from pathlib import Path
 import re
@@ -14,7 +14,15 @@ MOCKS = r'''
 # Keep cleanup glob assertions independent of files on the test host.
 set -f
 record() { printf '%s\n' "$*" >&2; [[ "$*" != "$FAIL_AT" ]] || return 42; }
-test() { record test "$@" || return; [[ "$*" == '-x /usr/bin/niriusd' ]] || builtin test "$@"; }
+test() {
+    record test "$@" || return
+    case "$*" in
+        '-x /usr/bin/niriusd') return 0 ;;
+        '! -e /usr/share/zfs/zfs-signing-cert.der') [[ ${CERT_PRESENT:-0} == 0 ]] ;;
+        '! -L /usr/share/zfs/zfs-signing-cert.der') [[ ${CERT_SYMLINK:-0} == 0 ]] ;;
+        *) builtin test "$@" ;;
+    esac
+}
 rpm() {
     record rpm "$@" || return
     if [[ $* == '--verify zfs' ]]; then
@@ -28,13 +36,17 @@ openssl() { record openssl "$@" || return; printf '%s\n' "$SERIAL"; }
 bash() {
     record bash "$@" || return
     if [[ $1 == /tmp/build.sh ]]; then
-        [[ $VARIANT == fedora-niri-proof ]] || return 1
+        [[ $VARIANT == fedora-niri ]] || return 1
         installed=1
     elif [[ $1 == /tmp/install-fedora-tools.sh || $1 == /tmp/install-fedora-editors.sh || $1 == /tmp/install-fedora-cli.sh || $1 == /tmp/install-sanoid.sh || $1 == /tmp/install-fedora-fonts.sh ]]; then
         installed=1
         if [[ $1 == /tmp/install-fedora-editors.sh ]]; then editors_installed=1; fi
     else
-        [[ "$*" == '/tmp/validate-zfs.sh 2.4.4 12:34:AB:CD' ]] || return 1
+        if [[ $ZFS_BUILD_MODE == unsigned-testing ]]; then
+            [[ "$*" == '/tmp/validate-zfs.sh 2.4.4 --unsigned-testing' ]] || return 1
+        else
+            [[ "$*" == '/tmp/validate-zfs.sh 2.4.4 12:34:AB:CD' ]] || return 1
+        fi
     fi
 }
 depmod() { record depmod "$@"; }
@@ -72,7 +84,7 @@ class FedoraBuildTests(unittest.TestCase):
     def run_gate(self, layer=0, **changes):
         env = dict(os.environ, KERNEL="7.1.13-200.fc44.x86_64",
                    AFTER_KERNEL="7.1.13-200.fc44.x86_64", SERIAL="serial=1234ABCD",
-                   FAIL_AT="")
+                   FAIL_AT="", ZFS_BUILD_MODE="unsigned-testing")
         env.update(changes)
         # Replace only the container marker probe; every mutating command is mocked.
         script = SCRIPTS[layer].replace('test -f /run/.containerenv || test -f /.dockerenv',
@@ -94,7 +106,7 @@ class FedoraBuildTests(unittest.TestCase):
                 ordered = [f"bash {installer}" for installer in installers] + [
                     "test 7.1.13-200.fc44.x86_64 = 7.1.13-200.fc44.x86_64",
                     "depmod -a 7.1.13-200.fc44.x86_64",
-                    "bash /tmp/validate-zfs.sh 2.4.4 12:34:AB:CD",
+                    "bash /tmp/validate-zfs.sh 2.4.4 --unsigned-testing",
                 ]
                 if layer == 1:
                     ordered += ["zeditor --version", "devpod version", "starship --version",
@@ -123,6 +135,42 @@ class FedoraBuildTests(unittest.TestCase):
                     self.assertLess(calls.index("rm -rf -- /tmp/fedora-smoke"),
                                     calls.index("bootc container lint"))
 
+    def test_explicit_modes_never_fall_back(self):
+        for layer in range(len(SCRIPTS)):
+            with self.subTest(layer=layer):
+                unsigned = self.run_gate(layer, SERIAL="invalid")
+                self.assertEqual(unsigned.returncode, 0, unsigned.stderr)
+                self.assertNotIn("openssl", unsigned.stderr)
+                signed = self.run_gate(layer, ZFS_BUILD_MODE="signed")
+                self.assertEqual(signed.returncode, 0, signed.stderr)
+                self.assertIn("bash /tmp/validate-zfs.sh 2.4.4 12:34:AB:CD", signed.stderr)
+                self.assertNotIn("--unsigned-testing", signed.stderr)
+                cert_failure = self.run_gate(
+                    layer, ZFS_BUILD_MODE="signed",
+                    FAIL_AT="openssl x509 -inform DER -in /usr/share/zfs/zfs-signing-cert.der -noout -serial",
+                )
+                self.assertNotEqual(cert_failure.returncode, 0)
+                self.assertNotIn("bash /tmp/", cert_failure.stderr)
+                for changes in ({"ZFS_BUILD_MODE": ""}, {"ZFS_BUILD_MODE": "unsigned"},
+                                {"ZFS_BUILD_MODE": "--unsigned-testing"},
+                                {"ZFS_BUILD_MODE": "unknown"}, {"CERT_PRESENT": "1"},
+                                {"CERT_SYMLINK": "1"}):
+                    with self.subTest(changes=changes):
+                        result = self.run_gate(layer, **changes)
+                        self.assertNotEqual(result.returncode, 0)
+                        self.assertNotIn("bash /tmp/", result.stderr)
+                        self.assertNotIn("bootc container lint", result.stderr)
+
+    def test_validator_rejects_unknown_flags_before_querying_host(self):
+        for flag in ("--unsigned", "--unsigned-testing=1", "--unknown", ""):
+            with self.subTest(flag=flag):
+                result = subprocess.run(
+                    ["bash", str(ROOT / "scripts/validate-zfs.sh"), "2.4.4", flag],
+                    capture_output=True, text=True,
+                )
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("invalid signing key ID", result.stderr)
+
     def test_zfs_corruption_fails_closed(self):
         for changes in ({"BAD_ZFS": "1"}, {"DAMAGED_ZFS": "1"}, {"CHANGED_ZFS": "1"}):
             with self.subTest(changes=changes):
@@ -136,7 +184,8 @@ class FedoraBuildTests(unittest.TestCase):
     def test_invalid_inputs_and_kernel_changes_fail_closed(self):
         for changes in ({"CONTAINER": "0"}, {"KERNEL": ""},
                         {"KERNEL": "../host"}, {"KERNEL": "a\nb"},
-                        {"SERIAL": "serial=XYZ"}, {"SERIAL": "serial=123"},
+                        {"ZFS_BUILD_MODE": "signed", "SERIAL": "serial=XYZ"},
+                        {"ZFS_BUILD_MODE": "signed", "SERIAL": "serial=123"},
                         {"AFTER_KERNEL": "7.1.14-200.fc44.x86_64"}):
             for layer in range(len(SCRIPTS)):
                 with self.subTest(layer=layer, changes=changes):
@@ -160,8 +209,9 @@ class FedoraBuildTests(unittest.TestCase):
                     self.assertEqual(result.stderr.splitlines(), expected)
 
     def test_explicit_copy_allowlist_and_syntax(self):
-        self.assertIn("ARG BASE_IMAGE=localhost/zfs-runtime:proof\n", TEXT)
-        self.assertIn("ARG NIRIUS_IMAGE=localhost/nirius-artifact:0.9.0\n", TEXT)
+        self.assertIn("ARG BASE_IMAGE=localhost/zfs-runtime:unsigned-testing\n", TEXT)
+        self.assertIn("ARG NIRIUS_IMAGE=localhost/nirius-artifact:testing\n", TEXT)
+        self.assertIn("ARG ZFS_BUILD_MODE=unsigned-testing\n", TEXT)
         self.assertEqual(re.findall(r"^FROM (.+)$", TEXT, re.MULTILINE),
                          ["${NIRIUS_IMAGE} AS nirius-artifact", "${BASE_IMAGE}"])
         self.assertEqual([line for line in TEXT.splitlines() if line.startswith("COPY")], [

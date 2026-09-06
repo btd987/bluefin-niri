@@ -1,4 +1,4 @@
-# Unpublished runtime. Default unsigned local proof; candidate selects verified.
+# Runtime validation. Hardware testing must explicitly select unsigned-testing.
 # Use --no-cache for verified builds: mounted artifact changes may reuse layers.
 # podman build -f Containerfile.zfs-runtime --build-arg ZFS_RPM_IMAGE=localhost/zfs-rpms-test-proof:latest -t localhost/zfs-runtime:proof .
 ARG ZFS_RPM_IMAGE=localhost/zfs-rpms-test-proof:latest

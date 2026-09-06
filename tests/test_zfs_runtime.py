@@ -77,7 +77,7 @@ elif name == "systemctl":
     assert args == ["--root=/", "list-unit-files", "--no-legend", "--no-pager", "zfs*"]
     print(data.get("units", "zfs.target disabled disabled\nzfs-import.service masked disabled\nzfs-scrub@.service static -"))
 elif name == "validate-zfs":
-    assert args == ["2.4.4", "12:34:AB:CD"]
+    assert args == ["2.4.4", "--unsigned-testing" if data["mode"] == "unsigned-testing" else "12:34:AB:CD"]
 elif name == "bootc":
     assert args == ["container", "lint"]
     for path in data["residue"]:
@@ -95,7 +95,7 @@ class ZFSRuntimeTests(unittest.TestCase):
             residue = ["tmp/zfs-runtime", "var/cache/libdnf5", "var/lib/dnf", "var/lib/dnf5",
                        "run/dnf", "run/selinux-policy", "var/log/dnf5.log",
                        "var/log/dnf.rpm.log.1", "var/cache/ldconfig/aux-cache"]
-            data = {"kernel": KERNEL, "residue": residue, **(changes or {})}
+            data = {"kernel": KERNEL, "residue": residue, "mode": mode, **(changes or {})}
             (root / "data.json").write_text(json.dumps(data))
             (root / "bin").mkdir()
             for command in ("rpm", "openssl", "dnf5", "systemctl", "depmod", "bootc", "validate-zfs", "gpg", "gpgconf"):
@@ -115,8 +115,11 @@ class ZFSRuntimeTests(unittest.TestCase):
             artifacts = root / "run/zfs-rpms"
             artifacts.mkdir(parents=True)
             (artifacts / "kernel-uname-r").write_text(data.get("artifact_kernel", KERNEL))
-            (artifacts / "zfs-signing-cert.der").write_text("public certificate fixture")
-            if not data.get("missing_key"):
+            if not data.get("missing_marker"):
+                (artifacts / "build-mode").write_text(data.get("marker", "unsigned-testing" if mode == "unsigned-testing" else "signed") + "\n")
+            if mode != "unsigned-testing" or data.get("certificate"):
+                (artifacts / "zfs-signing-cert.der").write_text("public certificate fixture")
+            if (mode != "unsigned-testing" or data.get("public_key")) and not data.get("missing_key"):
                 (artifacts / "zfs-rpm-signing-key.asc").write_text("public key fixture")
             for name in packages if packages is not None else NAMES:
                 (artifacts / (name + ".rpm")).touch()
@@ -139,8 +142,8 @@ class ZFSRuntimeTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertTrue(cert)
         transaction = next(c for c in calls if c[0] == "dnf5" and "install" in c)
-        self.assertEqual(transaction[1:5], ["-y", "--setopt=localpkg_gpgcheck=0", "--exclude=kernel*", "install"])
-        self.assertEqual(len(transaction[5:]), 6)
+        self.assertEqual(transaction[1:6], ["-y", "--setopt=gpgcheck=1", "--setopt=localpkg_gpgcheck=0", "--exclude=kernel*", "install"])
+        self.assertEqual(len(transaction[6:]), 6)
         commands = [c[0] for c in calls]
         self.assertLess(commands.index("dnf5"), commands.index("systemctl"))
         self.assertLess(commands.index("systemctl"), commands.index("depmod"))
@@ -162,6 +165,23 @@ class ZFSRuntimeTests(unittest.TestCase):
         transaction = next(c for c in calls if c[0] == "dnf5" and "install" in c)
         self.assertIn("--setopt=localpkg_gpgcheck=1", transaction)
 
+    def test_unsigned_testing(self):
+        result, calls, cert = self.run_install(mode="unsigned-testing")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(cert)
+        self.assertFalse(any(c[0] in ("openssl", "gpg", "gpgconf") for c in calls))
+        self.assertIn(["validate-zfs", "2.4.4", "--unsigned-testing"], calls)
+        transaction = next(c for c in calls if c[0] == "dnf5" and "install" in c)
+        self.assertIn("--setopt=gpgcheck=1", transaction)
+        self.assertIn("--setopt=localpkg_gpgcheck=0", transaction)
+        self.assertEqual(len(transaction[transaction.index("install") + 1:]), 6)
+        for changes in ({"missing_marker": True}, {"marker": "signed"}, {"marker": "typo"},
+                        {"marker": ""}, {"certificate": True}, {"public_key": True}):
+            with self.subTest(changes=changes):
+                result, calls, _ = self.run_install(changes, mode="unsigned-testing")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(calls, [])
+
     def test_verified_rejects_untrusted_before_install(self):
         cases = [{"missing_key": True}, {"fingerprints": []}, {"fingerprints": ["B" * 40]},
                  {"fingerprints": [FINGERPRINT, "B" * 40]}, {"gpg_import_status": 2},
@@ -177,7 +197,8 @@ class ZFSRuntimeTests(unittest.TestCase):
                 self.assertFalse(any(c[0] == "dnf5" for c in calls))
                 self.assertFalse(any(c[:2] == ["rpm", "--import"] for c in calls))
         for mode, fingerprint in (("verified", ""), ("verified", "A" * 16),
-                                  ("verified", "a" * 40), ("unsigned-proof", FINGERPRINT), ("typo", "")):
+                                  ("verified", "a" * 40), ("unsigned-proof", FINGERPRINT),
+                                  ("unsigned-testing", FINGERPRINT), ("", ""), ("typo", "")):
             result, calls, _ = self.run_install(mode=mode, fingerprint=fingerprint)
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(calls, [])

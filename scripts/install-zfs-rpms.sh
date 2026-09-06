@@ -1,23 +1,27 @@
 #!/usr/bin/env bash
-# Fresh, unpublished container only. Unsigned mode is local proof, not trust.
+# Fresh container only. Unsigned testing requires same-run builder artifacts.
 set -euo pipefail
 export LC_ALL=C
 
 fail() { printf 'ZFS runtime installation failed: %s\n' "$*" >&2; exit 1; }
 [[ $# == 0 ]] || fail 'no arguments expected; use the runtime Containerfile'
 [[ -f /run/.containerenv || -f /.dockerenv ]] || fail 'container required'
-mode=${ZFS_RPM_TRUST_MODE:-unsigned-proof}
+mode=${ZFS_RPM_TRUST_MODE-unsigned-proof}
 fingerprint=${ZFS_RPM_SIGNING_FINGERPRINT:-}
 case "$mode" in
-    unsigned-proof)
+    unsigned-proof|unsigned-testing)
         [[ -z $fingerprint ]] || fail 'fingerprint requires verified mode'
         localpkg_gpgcheck=0 ;;
     verified)
         [[ $fingerprint =~ ^[A-F0-9]{40}$ ]] || fail 'expected full uppercase OpenPGP v4 signing fingerprint'
         localpkg_gpgcheck=1 ;;
-    *) fail 'expected unsigned-proof or verified trust mode' ;;
+    *) fail 'expected unsigned-proof, unsigned-testing or verified trust mode' ;;
 esac
 artifacts=/run/zfs-rpms
+if [[ $mode == unsigned-testing ]]; then
+    [[ -f $artifacts/build-mode && $(< "$artifacts/build-mode") == unsigned-testing ]] || fail 'unsigned-testing builder marker required'
+    [[ ! -e $artifacts/zfs-signing-cert.der && ! -e $artifacts/zfs-rpm-signing-key.asc ]] || fail 'unsigned-testing artifacts must not contain signing certificates or keys'
+fi
 if [[ $mode == verified ]]; then
     [[ -s $artifacts/zfs-rpm-signing-key.asc ]] || fail 'RPM public key required'
     export GNUPGHOME
@@ -33,10 +37,12 @@ kernel=$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-core)
 [[ $kernel =~ ^[[:alnum:]_+]+([.][[:alnum:]_+]+)*-[[:alnum:]_+]+([.][[:alnum:]_+]+)+$ ]] || fail 'expected exactly one installed kernel-core'
 [[ $(< "$artifacts/kernel-uname-r") == "$kernel" ]] || fail 'artifact kernel mismatch'
 cert=$artifacts/zfs-signing-cert.der
-serial=$(openssl x509 -inform DER -in "$cert" -noout -serial)
-serial=${serial#serial=}
-[[ $serial =~ ^([[:xdigit:]]{2}){2,}$ ]] || fail 'invalid certificate serial'
-sig_key=$(printf '%s' "$serial" | sed 's/../&:/g; s/:$//')
+if [[ $mode != unsigned-testing ]]; then
+    serial=$(openssl x509 -inform DER -in "$cert" -noout -serial)
+    serial=${serial#serial=}
+    [[ $serial =~ ^([[:xdigit:]]{2}){2,}$ ]] || fail 'invalid certificate serial'
+    sig_key=$(printf '%s' "$serial" | sed 's/../&:/g; s/:$//')
+fi
 
 names=(zfs libnvpair3 libuutil3 libzfs7 libzpool7 "kmod-zfs-$kernel")
 declare -A selected=()
@@ -87,7 +93,7 @@ if [[ $mode == verified ]]; then
     trap - EXIT
 fi
 # Fedora repository GPG policy is unchanged in either mode.
-dnf5 -y --setopt=localpkg_gpgcheck="$localpkg_gpgcheck" --exclude='kernel*' install "${rpms[@]}"
+dnf5 -y --setopt=gpgcheck=1 --setopt=localpkg_gpgcheck="$localpkg_gpgcheck" --exclude='kernel*' install "${rpms[@]}"
 [[ $(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-core) == "$kernel" ]] || fail 'kernel changed during installation'
 for name in "${names[@]}"; do
     [[ $(rpm -q --qf '%{EPOCHNUM}:%{VERSION}-%{RELEASE}.%{ARCH}' "$name") == "0:2.4.4-1.fc44.${kernel##*.}" ]] || fail "installed RPM mismatch: $name"
@@ -101,9 +107,14 @@ while read -r unit state _; do
         enabled|enabled-runtime|linked|linked-runtime|alias) fail "enabled or linked ZFS unit remains: $unit" ;;
     esac
 done <<< "$unit_files"
-install -Dm644 "$cert" /usr/share/zfs/zfs-signing-cert.der
 depmod -a "$kernel"
-bash /tmp/zfs-runtime/validate-zfs.sh 2.4.4 "$sig_key"
+if [[ $mode == unsigned-testing ]]; then
+    [[ ! -e /usr/share/zfs/zfs-signing-cert.der ]] || fail 'unexpected installed module certificate'
+    bash /tmp/zfs-runtime/validate-zfs.sh 2.4.4 --unsigned-testing
+else
+    install -Dm644 "$cert" /usr/share/zfs/zfs-signing-cert.der
+    bash /tmp/zfs-runtime/validate-zfs.sh 2.4.4 "$sig_key"
+fi
 
 # Only fresh-image transaction residue, never host or persistent storage data.
 # RPMs are a read-only build mount and need no deletion.

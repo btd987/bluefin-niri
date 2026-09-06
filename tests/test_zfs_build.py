@@ -49,7 +49,7 @@ elif name == "rpm":
                "%{ARCH}": "x86_64"}[field])
 elif name == "make":
     ksrc = root / "usr/src/kernels" / kernel
-    assert (ksrc / "certs/signing_key.pem").is_symlink()
+    assert (ksrc / "certs/signing_key.pem").is_symlink() == (data["mode"] == "signed")
     assert not (root / "lib/modules" / kernel / "build").exists()
     for package in ["zfs", "libnvpair3", "libuutil3", "libzfs7", "libzpool7",
                     "kmod-zfs-" + kernel, "zfs-dkms", "zfs-test", "libzfs7-devel"]:
@@ -61,18 +61,20 @@ elif name == "cpio":
     for module in ["spl", "zfs"]:
         (dest / (module + ".ko")).touch()
 elif name == "modinfo":
-    print({"vermagic": kernel + " SMP", "sig_key": data.get("sig_key", "12:34"),
-           "sig_hashalgo": "sha256"}[args[1]])
+    unsigned = data["mode"] == "unsigned-testing"
+    print({"vermagic": kernel + " SMP", "signer": data.get("signer", "" if unsigned else "key"),
+           "sig_key": data.get("sig_key", "" if unsigned else "12:34"),
+           "sig_hashalgo": data.get("sig_hashalgo", "" if unsigned else "sha256")}[args[1]])
 elif name not in ["dnf5", "rpm2cpio", "configure"]:
     raise RuntimeError((name, args))
 '''
 
 
 class ZFSBuildTests(unittest.TestCase):
-    def run_build(self, changes=None, missing=None):
+    def run_build(self, changes=None, missing=None, mode="signed"):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            data = {"kernel": KERNEL, **(changes or {})}
+            data = {"kernel": KERNEL, "mode": mode, **(changes or {})}
             (root / "data.json").write_text(json.dumps(data))
             (root / "bin").mkdir()
             for command in ("openssl", "rpm", "dnf5", "make", "rpm2cpio", "cpio", "modinfo"):
@@ -82,7 +84,7 @@ class ZFSBuildTests(unittest.TestCase):
             for secret in ("zfs_signing_key", "zfs_signing_cert"):
                 path = root / "run/secrets" / secret
                 path.parent.mkdir(parents=True, exist_ok=True)
-                if secret != missing:
+                if secret != missing and (mode != "unsigned-testing" or data.get("secrets")):
                     path.write_text("test placeholder, not a key")
             (root / ".dockerenv").touch()
             ksrc = root / "usr/src/kernels" / KERNEL
@@ -104,9 +106,11 @@ class ZFSBuildTests(unittest.TestCase):
             for path in ("/run/", "/.dockerenv", "/usr/src/", "/lib/modules/", "/build/", "/out"):
                 text = re.sub(r"(?<![\w/-])" + re.escape(path), str(root) + path, text)
             result = subprocess.run(["bash", "-c", text], text=True, capture_output=True,
-                                    env={**os.environ, "PATH": f"{root / 'bin'}:/usr/bin:/bin"})
+                                    env={**os.environ, "PATH": f"{root / 'bin'}:/usr/bin:/bin", "ZFS_BUILD_MODE": mode})
             calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()] if (root / "calls").exists() else []
             outputs = sorted(p.name for p in (root / "out").glob("*"))
+            if "build-mode" in outputs:
+                self.assertEqual((root / "out/build-mode").read_text(), mode + "\n")
             self.assertTrue(link.is_symlink(), result.stderr)
             self.assertFalse((ksrc / "certs/signing_key.pem").is_symlink())
             return result, calls, outputs
@@ -116,7 +120,7 @@ class ZFSBuildTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(["dnf5", "-y", "install", f"kernel-devel-uname-r = {KERNEL}"], calls)
         self.assertIn(["rpm", "-q", "--whatprovides", "kernel-devel-uname-r", "--qf", r"%{VERSION}-%{RELEASE}.%{ARCH}\n"], calls)
-        self.assertEqual(outputs, sorted(["PROOF.txt", "kernel-uname-r", "zfs-signing-cert.der"] +
+        self.assertEqual(outputs, sorted(["PROOF.txt", "build-mode", "kernel-uname-r", "zfs-signing-cert.der"] +
                          [p + ".rpm" for p in ("zfs", "libnvpair3", "libuutil3", "libzfs7", "libzpool7", "kmod-zfs-" + KERNEL)]))
         make = next(c for c in calls if c[0] == "make")
         self.assertEqual(make[1:3], ["rpm-utils", "rpm-kmod"])
@@ -130,6 +134,26 @@ class ZFSBuildTests(unittest.TestCase):
                 result, calls, _ = self.run_build(missing=secret)
                 self.assertNotEqual(result.returncode, 0)
                 self.assertFalse(calls)
+
+    def test_unsigned_testing(self):
+        result, calls, outputs = self.run_build(mode="unsigned-testing")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("build-mode", outputs)
+        self.assertNotIn("zfs-signing-cert.der", outputs)
+        self.assertEqual(len([p for p in outputs if p.endswith(".rpm")]), 6)
+        self.assertFalse(any(c[0] == "openssl" for c in calls))
+        for changes in ({"sig_key": "12:34"}, {"signer": "test key"},
+                        {"sig_hashalgo": "sha256"}, {"secrets": True}, {"fail": "modinfo"},
+                        {"devel": "wrong"}, {"omit": "zfs"}):
+            with self.subTest(changes=changes):
+                result, _, _ = self.run_build(changes, mode="unsigned-testing")
+                self.assertNotEqual(result.returncode, 0)
+
+    def test_invalid_mode(self):
+        for mode in ("", "unsigned", "typo"):
+            result, calls, _ = self.run_build(mode=mode)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(calls, [])
 
     def test_kernel_guards(self):
         for kernel in ("", KERNEL + "\n" + KERNEL, "../../bad"):
@@ -172,7 +196,8 @@ class ZFSBuildTests(unittest.TestCase):
         self.assertIn('kernel-devel-uname-r = $kernel', prerequisites)
         self.assertIn('Module.symvers', prerequisites)
         for secret in ("zfs_signing_key", "zfs_signing_cert"):
-            self.assertIn(f"type=secret,id={secret},required=true", builder)
+            self.assertIn(f"type=secret,id={secret}", builder)
+        self.assertIn("ARG ZFS_BUILD_MODE=signed", builder)
         self.assertIn("FROM scratch AS zfs-rpms", builder)
         script = SCRIPT.read_text()
         self.assertIn("./configure --with-config=all --with-spec=generic", script)

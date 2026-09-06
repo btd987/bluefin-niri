@@ -1,4 +1,4 @@
-# Unpublished RPM and runtime proof only: no publication integration.
+# ZFS RPM artifacts and runtime validation for signed or unsigned testing builds.
 # Source integrity and maintainer signature are checked before extraction.
 # This is not a Secure Boot acceptance test.
 FROM quay.io/fedora/fedora-bootc:44@sha256:d6481b291e960abb02a346294dcac2818df8dfe2b1bc51d1ae8fa53a15718756 AS zfs-source
@@ -27,17 +27,20 @@ RUN set -eu; kernel=$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}' kernel-core); 
     test -s "/usr/src/kernels/$kernel/Module.symvers"
 
 FROM zfs-prerequisites AS zfs-builder
+ARG ZFS_BUILD_MODE=signed
 COPY scripts/build-zfs-rpms.sh /build/build-zfs-rpms.sh
 # Both inputs are mounted, never COPY'd. Supply an existing unencrypted PEM key
 # and its public X.509 DER certificate. Never give production keys to PR builds.
-RUN --mount=type=secret,id=zfs_signing_key,required=true \
-    --mount=type=secret,id=zfs_signing_cert,required=true \
+# The script requires both secrets only in signed mode.
+RUN --mount=type=secret,id=zfs_signing_key \
+    --mount=type=secret,id=zfs_signing_cert \
     bash /build/build-zfs-rpms.sh
 
 FROM scratch AS zfs-rpms
 COPY --from=zfs-builder /out/ /
 
 FROM quay.io/fedora/fedora-bootc:44@sha256:d6481b291e960abb02a346294dcac2818df8dfe2b1bc51d1ae8fa53a15718756 AS zfs-runtime
+ARG ZFS_RPM_TRUST_MODE=unsigned-proof
 # Read-only build mount keeps RPM artifacts out of runtime layers.
 COPY scripts/install-zfs-rpms.sh scripts/validate-zfs.sh /tmp/zfs-runtime/
 RUN --mount=type=bind,from=zfs-builder,source=/out,target=/run/zfs-rpms \

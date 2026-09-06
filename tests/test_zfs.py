@@ -113,6 +113,32 @@ class ZFSTests(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(calls, [])
 
+    def test_unsigned_testing(self):
+        for fields in self.data["modules"].values():
+            for field in ("signer", "sig_key", "sig_hashalgo"):
+                fields[field] = ""
+        args = [VERSION, "--unsigned-testing"]
+        result, calls = self.run_validator(args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 16)
+        signed, _ = self.run_validator()
+        self.assertNotEqual(signed.returncode, 0)
+        original = copy.deepcopy(self.data)
+        for module in ("spl", "zfs"):
+            for field, value in (("signer", "test key"), ("sig_key", KEY), ("sig_hashalgo", "sha256"),
+                                 ("signer", " "), ("version", "wrong"), ("vermagic", "wrong"),
+                                 ("filename", "/tmp/zfs.ko")):
+                with self.subTest(module=module, field=field):
+                    self.data = copy.deepcopy(original)
+                    self.data["modules"][module][field] = value
+                    result, _ = self.run_validator(args)
+                    self.assertNotEqual(result.returncode, 0)
+        for call in calls:
+            self.data = copy.deepcopy(original)
+            self.data["fail"] = call
+            result, _ = self.run_validator(args)
+            self.assertNotEqual(result.returncode, 0)
+
     def test_kernel_count_and_format(self):
         for kernel in ("", KERNEL + "\n" + KERNEL, KERNEL + "\n6.18.1-1.fc44.x86_64",
                        "../../host", "6.19.8", "6.19.8-../host.x86_64"):

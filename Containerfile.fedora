@@ -1,9 +1,9 @@
-# Unpublished desktop proof. No signing inputs are copied from the build context.
-ARG BASE_IMAGE=localhost/zfs-runtime:proof
-# Verified local artifact image ID: e583ed74e0bc7d3ee1cdb5659dff9becc1e7c1ad63358905252512b1380ee8f1
-ARG NIRIUS_IMAGE=localhost/nirius-artifact:0.9.0
+# Testing desktop. CI builds both dependency images and passes their tags explicitly.
+ARG BASE_IMAGE=localhost/zfs-runtime:unsigned-testing
+ARG NIRIUS_IMAGE=localhost/nirius-artifact:testing
 FROM ${NIRIUS_IMAGE} AS nirius-artifact
 FROM ${BASE_IMAGE}
+ARG ZFS_BUILD_MODE=unsigned-testing
 
 COPY build.sh /tmp/build.sh
 COPY system_files /tmp/system_files
@@ -14,10 +14,20 @@ RUN /usr/bin/bash -euo pipefail <<'EOF'
 test -f /run/.containerenv || test -f /.dockerenv
 kernel=$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-core)
 [[ $kernel =~ ^[[:alnum:]_+]+([.][[:alnum:]_+]+)*-[[:alnum:]_+]+([.][[:alnum:]_+]+)+$ ]]
-serial=$(openssl x509 -inform DER -in /usr/share/zfs/zfs-signing-cert.der -noout -serial)
-[[ $serial =~ ^serial=([[:xdigit:]]{2})+$ ]]
-key=$(printf '%s' "${serial#serial=}" | sed 's/../&:/g; s/:$//')
-VARIANT=fedora-niri-proof bash /tmp/build.sh
+case "$ZFS_BUILD_MODE" in
+    unsigned-testing)
+        test ! -e /usr/share/zfs/zfs-signing-cert.der
+        test ! -L /usr/share/zfs/zfs-signing-cert.der
+        key=--unsigned-testing
+        ;;
+    signed)
+        serial=$(openssl x509 -inform DER -in /usr/share/zfs/zfs-signing-cert.der -noout -serial)
+        [[ $serial =~ ^serial=([[:xdigit:]]{2})+$ ]]
+        key=$(printf '%s' "${serial#serial=}" | sed 's/../&:/g; s/:$//')
+        ;;
+    *) printf 'Invalid ZFS_BUILD_MODE: %s\n' "$ZFS_BUILD_MODE" >&2; exit 1 ;;
+esac
+VARIANT=fedora-niri bash /tmp/build.sh
 test "$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-core)" = "$kernel"
 depmod -a "$kernel"
 bash /tmp/validate-zfs.sh 2.4.4 "$key"
@@ -38,9 +48,19 @@ RUN /usr/bin/bash -euo pipefail <<'EOF'
 test -f /run/.containerenv || test -f /.dockerenv
 kernel=$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-core)
 [[ $kernel =~ ^[[:alnum:]_+]+([.][[:alnum:]_+]+)*-[[:alnum:]_+]+([.][[:alnum:]_+]+)+$ ]]
-serial=$(openssl x509 -inform DER -in /usr/share/zfs/zfs-signing-cert.der -noout -serial)
-[[ $serial =~ ^serial=([[:xdigit:]]{2})+$ ]]
-key=$(printf '%s' "${serial#serial=}" | sed 's/../&:/g; s/:$//')
+case "$ZFS_BUILD_MODE" in
+    unsigned-testing)
+        test ! -e /usr/share/zfs/zfs-signing-cert.der
+        test ! -L /usr/share/zfs/zfs-signing-cert.der
+        key=--unsigned-testing
+        ;;
+    signed)
+        serial=$(openssl x509 -inform DER -in /usr/share/zfs/zfs-signing-cert.der -noout -serial)
+        [[ $serial =~ ^serial=([[:xdigit:]]{2})+$ ]]
+        key=$(printf '%s' "${serial#serial=}" | sed 's/../&:/g; s/:$//')
+        ;;
+    *) printf 'Invalid ZFS_BUILD_MODE: %s\n' "$ZFS_BUILD_MODE" >&2; exit 1 ;;
+esac
 config=$(mktemp -d)
 trap 'rm -rf -- "$config"' EXIT
 export HOME="$config" XDG_CONFIG_HOME="$config/config" XDG_CACHE_HOME="$config/cache" XDG_DATA_HOME="$config/data" XDG_STATE_HOME="$config/state"
