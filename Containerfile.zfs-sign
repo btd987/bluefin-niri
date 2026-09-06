@@ -1,7 +1,7 @@
 # No publication. The only output is six signed RPMs and public metadata.
 ARG ZFS_RPM_IMAGE=localhost/zfs-rpms-test-proof:latest
 FROM ${ZFS_RPM_IMAGE} AS zfs-rpm-artifacts
-FROM quay.io/fedora/fedora-bootc:44@sha256:d6481b291e960abb02a346294dcac2818df8dfe2b1bc51d1ae8fa53a15718756 AS zfs-signer
+FROM quay.io/fedora/fedora-bootc:44@sha256:cc0e99fb83e3cf2bd34b073535cfa656dc817dfd29911a1c47546bb013e1c845 AS zfs-signer
 RUN dnf5 -y --exclude='kernel*' install rpm-sign gnupg2 && dnf5 clean all
 COPY scripts/sign-zfs-rpms.sh /tmp/sign-zfs-rpms.sh
 ARG ZFS_RPM_SIGNING_FINGERPRINT

@@ -23,7 +23,7 @@ install -Dm755 target/release/niriusd /out/niriusd
 {
     printf 'name=nirius\nversion=%s\nsource_url=%s\nsource_sha256=%s\n' \
         "$version" "$source_url" "$source_sha256"
-    printf '%s\n' 'builder_base=quay.io/fedora/fedora-bootc:44@sha256:d6481b291e960abb02a346294dcac2818df8dfe2b1bc51d1ae8fa53a15718756'
+    printf '%s\n' 'builder_base=quay.io/fedora/fedora-bootc:44@sha256:cc0e99fb83e3cf2bd34b073535cfa656dc817dfd29911a1c47546bb013e1c845'
     printf 'architecture=%s\n' "$(uname -m)"
     rustc --version
     cargo --version

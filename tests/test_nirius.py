@@ -12,7 +12,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE_SHA256 = "82478b606e560f82f59c8f580da0a9eb88448c08b69996cba55029aa03cabfbe"
-BASE = "quay.io/fedora/fedora-bootc:44@sha256:d6481b291e960abb02a346294dcac2818df8dfe2b1bc51d1ae8fa53a15718756"
+BASE = "quay.io/fedora/fedora-bootc:44@sha256:cc0e99fb83e3cf2bd34b073535cfa656dc817dfd29911a1c47546bb013e1c845"
 
 
 class NiriusTests(unittest.TestCase):

@@ -1,7 +1,7 @@
 # ZFS RPM artifacts and runtime validation for signed or unsigned testing builds.
 # Source integrity and maintainer signature are checked before extraction.
 # This is not a Secure Boot acceptance test.
-FROM quay.io/fedora/fedora-bootc:44@sha256:d6481b291e960abb02a346294dcac2818df8dfe2b1bc51d1ae8fa53a15718756 AS zfs-source
+FROM quay.io/fedora/fedora-bootc:44@sha256:cc0e99fb83e3cf2bd34b073535cfa656dc817dfd29911a1c47546bb013e1c845 AS zfs-source
 RUN dnf5 -y --exclude='kernel*' install curl tar gzip gnupg2 && dnf5 clean all
 WORKDIR /build
 COPY scripts/verify-zfs-source.sh /build/verify-zfs-source.sh
@@ -39,7 +39,7 @@ RUN --mount=type=secret,id=zfs_signing_key \
 FROM scratch AS zfs-rpms
 COPY --from=zfs-builder /out/ /
 
-FROM quay.io/fedora/fedora-bootc:44@sha256:d6481b291e960abb02a346294dcac2818df8dfe2b1bc51d1ae8fa53a15718756 AS zfs-runtime
+FROM quay.io/fedora/fedora-bootc:44@sha256:cc0e99fb83e3cf2bd34b073535cfa656dc817dfd29911a1c47546bb013e1c845 AS zfs-runtime
 ARG ZFS_RPM_TRUST_MODE=unsigned-proof
 # Read-only build mount keeps RPM artifacts out of runtime layers.
 COPY scripts/install-zfs-rpms.sh scripts/validate-zfs.sh /tmp/zfs-runtime/

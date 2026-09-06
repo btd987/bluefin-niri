@@ -187,7 +187,7 @@ class ZFSBuildTests(unittest.TestCase):
         source, builder = container.split("FROM zfs-prerequisites AS zfs-builder")
         self.assertIn("AS zfs-source", source)
         self.assertNotIn("type=secret", source)
-        self.assertIn("sha256:d6481b291e960abb02a346294dcac2818df8dfe2b1bc51d1ae8fa53a15718756", source)
+        self.assertIn("sha256:cc0e99fb83e3cf2bd34b073535cfa656dc817dfd29911a1c47546bb013e1c845", source)
         self.assertIn("2a3c70d55a37cc71618a95a60e81ad66530201eb118d37741dc92efcf848c8b1", source)
         self.assertIn("sha256sum --check --strict", source)
         self.assertIn("--proto-redir '=https'", source)
