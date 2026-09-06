@@ -13,8 +13,8 @@ not a production signing/reviewer gate on test publication.
   into README; remove personal inventories and historical validation documents.
 - [x] Verify concise documentation and local links; standard source suite:
   223 tests, 202 passed, 21 opt-in skips, no failures. No tests reference removed docs.
-- [ ] Remove historical personal documentation and anonymize maintainer commit
-  metadata; verify the rewritten source tree and update the public main branch.
+- [x] Remove historical personal documentation and anonymize maintainer commit
+  metadata in the rewritten public main branch; verify the source tree is unchanged.
 - [ ] Publish the hardware-expanded image through trusted `main` testing CI.
 - [ ] Retest the published artifact with Secure Boot disabled: Wi-Fi, audio,
   cameras, readers, modems, graphics, suspend/resume, login and Noctalia lock.
