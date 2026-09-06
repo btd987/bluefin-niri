@@ -8,8 +8,8 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 TEXT = (ROOT / "Containerfile.fedora").read_text()
-SCRIPTS = re.findall(r"^RUN /usr/bin/bash -euo pipefail <<'EOF'\n(.*?)\nEOF$",
-                     TEXT, re.MULTILINE | re.DOTALL)
+SCRIPT_NAMES = ["build-fedora-foundation.sh", "build-fedora-tools.sh"]
+SCRIPTS = [(ROOT / "scripts" / name).read_text() for name in SCRIPT_NAMES]
 MOCKS = r'''
 # Keep cleanup glob assertions independent of files on the test host.
 set -f
@@ -218,14 +218,26 @@ class FedoraBuildTests(unittest.TestCase):
             "COPY build.sh /tmp/build.sh", "COPY system_files /tmp/system_files",
             "COPY fedora_files /tmp/fedora_files",
             "COPY scripts/validate-zfs.sh /tmp/validate-zfs.sh",
+            "COPY scripts/build-fedora-foundation.sh /tmp/build-fedora-foundation.sh",
             "COPY --from=nirius-artifact /nirius /niriusd /usr/bin/",
             "COPY --from=nirius-artifact /provenance.txt /usr/share/niri-system/nirius-provenance.txt",
             "COPY scripts/install-fedora-tools.sh scripts/install-fedora-editors.sh scripts/install-fedora-cli.sh scripts/install-sanoid.sh scripts/install-fedora-fonts.sh scripts/validate-zfs.sh /tmp/",
+            "COPY scripts/build-fedora-tools.sh /tmp/build-fedora-tools.sh",
         ])
-        self.assertLess(TEXT.index("\nEOF"), TEXT.index("COPY scripts/install-fedora-tools.sh"))
+        self.assertEqual(re.findall(r"^RUN (.+)$", TEXT, re.MULTILINE), [
+            f"/usr/bin/bash -euo pipefail /tmp/{name} && rm /tmp/{name}"
+            for name in SCRIPT_NAMES
+        ])
+        self.assertLess(TEXT.index("RUN /usr/bin/bash"), TEXT.index("COPY scripts/install-fedora-tools.sh"))
         self.assertNotIn("type=secret", TEXT)
         for script in SCRIPTS:
             subprocess.run(["bash", "-n"], input=script, text=True, check=True)
+
+    def test_containerfiles_avoid_unsupported_heredocs(self):
+        # The CI runner's older Podman parses heredoc bodies as instructions.
+        for path in ROOT.glob("Containerfile*"):
+            with self.subTest(path=path.name):
+                self.assertNotIn("<<", path.read_text())
 
 
 if __name__ == "__main__":

@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+test -f /run/.containerenv || test -f /.dockerenv
+kernel=$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-core)
+[[ $kernel =~ ^[[:alnum:]_+]+([.][[:alnum:]_+]+)*-[[:alnum:]_+]+([.][[:alnum:]_+]+)+$ ]]
+case "$ZFS_BUILD_MODE" in
+    unsigned-testing)
+        test ! -e /usr/share/zfs/zfs-signing-cert.der
+        test ! -L /usr/share/zfs/zfs-signing-cert.der
+        key=--unsigned-testing
+        ;;
+    signed)
+        serial=$(openssl x509 -inform DER -in /usr/share/zfs/zfs-signing-cert.der -noout -serial)
+        [[ $serial =~ ^serial=([[:xdigit:]]{2})+$ ]]
+        key=$(printf '%s' "${serial#serial=}" | sed 's/../&:/g; s/:$//')
+        ;;
+    *) printf 'Invalid ZFS_BUILD_MODE: %s\n' "$ZFS_BUILD_MODE" >&2; exit 1 ;;
+esac
+config=$(mktemp -d)
+trap 'rm -rf -- "$config"' EXIT
+export HOME="$config" XDG_CONFIG_HOME="$config/config" XDG_CACHE_HOME="$config/cache" XDG_DATA_HOME="$config/data" XDG_STATE_HOME="$config/state"
+# Fail on an already-damaged parent as well as any installer collision with ZFS.
+rpm --verify zfs
+zfs_integrity=$(sha256sum /sbin/zed /usr/lib/systemd/system/zfs-zed.service)
+bash /tmp/install-fedora-tools.sh
+bash /tmp/install-fedora-editors.sh
+bash /tmp/install-fedora-cli.sh
+bash /tmp/install-sanoid.sh
+bash /tmp/install-fedora-fonts.sh
+# BCC weakly recommends kernel-devel, which pulls GCC into the desktop runtime.
+dnf5 -y remove kernel-devel
+printf '%s\n' "$zfs_integrity" | sha256sum --check --strict -
+rpm --verify zfs
+test "$(rpm -q --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n' kernel-core)" = "$kernel"
+depmod -a "$kernel"
+bash /tmp/validate-zfs.sh 2.4.4 "$key"
+ZED_ALLOW_ROOT=true zeditor --version
+devpod version
+starship --version
+yazi --version
+ya --version
+lazygit --version
+nirius --version
+# niriusd does not implement --version; invoking it starts the session daemon.
+test -x /usr/bin/niriusd
+dnf5 clean all
+rm -rf /tmp/install-fedora-tools.sh /tmp/install-fedora-editors.sh /tmp/install-fedora-cli.sh /tmp/install-sanoid.sh /tmp/install-fedora-fonts.sh /tmp/validate-zfs.sh \
+    /var/cache/libdnf5 /var/lib/dnf /var/lib/dnf5 /run/dnf
+# DNF transaction logs may be directories; only remove its known log namespace.
+rm -rf /var/log/dnf*
+rm -f /var/cache/ldconfig/aux-cache
+rm -rf -- "$config"
+trap - EXIT
+bootc container lint
