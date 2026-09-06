@@ -377,10 +377,19 @@ install_fedora_niri_foundation() {
     # Require inherited bootc tooling used by the shared recipes.
     rpm -q bootc rpm-ostree
 
+    # Use the image RPM, never the build host's running kernel. Keep ZFS matched.
+    local kernel
+    kernel=$(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n')
+    if [[ -z "$kernel" || "$kernel" == *$'\n'* ]]; then
+        echo "ERROR: Expected exactly one installed Fedora kernel" >&2
+        return 1
+    fi
+
     # COPR and config-manager are used by the shared installer below.
     dnf5 install -y dnf5-plugins just
 
     # Desktop components otherwise inherited from Bluefin/Bazzite.
+    # linux-firmware does not pull in the split Intel Wi-Fi firmware packages.
     dnf5 install -y \
         gdm \
         accountsservice \
@@ -399,6 +408,10 @@ install_fedora_niri_foundation() {
         mesa-vulkan-drivers \
         libva-utils \
         linux-firmware \
+        iwlegacy-firmware \
+        iwlwifi-dvm-firmware \
+        iwlwifi-mvm-firmware \
+        iwlwifi-mld-firmware \
         xdg-desktop-portal \
         xdg-desktop-portal-gtk \
         xdg-utils \
@@ -421,6 +434,33 @@ install_fedora_niri_foundation() {
         gzip \
         coreutils
 
+    # Fedora-only hardware baseline; repository signatures remain required.
+    dnf5 install -y --repo=fedora --repo=updates \
+        --exclude=kernel-core --exclude=kernel-modules --exclude=kernel-modules-core \
+        "kernel-modules-extra-uname-r = $kernel" \
+        alsa-ucm \
+        alsa-utils \
+        alsa-firmware \
+        alsa-tools-firmware \
+        thermald \
+        lm_sensors \
+        intel-vsc-firmware \
+        libcamera-tools \
+        libcamera-gstreamer \
+        fprintd \
+        fprintd-pam \
+        libfprint \
+        pcsc-lite \
+        pcsc-lite-ccid \
+        opensc \
+        gnupg2-scdaemon \
+        yubikey-manager \
+        libertas-firmware \
+        usb_modeswitch \
+        usb_modeswitch-data \
+        ModemManager \
+        NetworkManager-wwan
+
     install_mise
     install_ublue_niri_noctalia
 
@@ -440,6 +480,20 @@ install_fedora_niri_foundation() {
     printf '%s\n' 'disable snapper-timeline.timer' 'disable snapper-cleanup.timer' \
         > /usr/lib/systemd/system-preset/00-fedora-niri-snapshots.preset
     systemctl disable snapper-timeline.timer snapper-cleanup.timer
+
+    # Keep stock virtualization/platform exclusions and ExecStart. Skip AMD hosts.
+    mkdir -p /usr/lib/systemd/system/thermald.service.d
+    printf '%s\n' '[Service]' \
+        'ExecCondition=/usr/bin/grep -qE "^vendor_id[[:space:]]*:[[:space:]]*GenuineIntel$" /proc/cpuinfo' \
+        > /usr/lib/systemd/system/thermald.service.d/10-intel-only.conf
+    systemctl enable thermald.service
+
+    # Fail the build if any intervening transaction replaced or added a kernel.
+    if [[ $(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n') != "$kernel" ]]; then
+        echo "ERROR: Fedora hardware installation changed the image kernel" >&2
+        return 1
+    fi
+    rpm -q "kernel-modules-extra-$kernel"
 
     systemctl enable NetworkManager.service bluetooth.service power-profiles-daemon.service
     systemctl enable gdm.service
