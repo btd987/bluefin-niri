@@ -253,17 +253,25 @@ skopeo() {
         step = block(FEDORA_BUILD, "      - name: Build Fedora testing image")
         shell = textwrap.dedent(block(step, "        run: |"))
         mock = '''
+skopeo() {
+  printf '%s\\n' "$*" >&2
+  printf '%s' "$TAG_JSON"
+  return "$INSPECT_STATUS"
+}
 podman() {
   printf '%s\\n' "$*"
   [[ "$*" != *"$FAIL_BUILD"* ]]
 }
 '''
+        base = "quay.io/fedora/fedora-bootc:44@sha256:" + "a" * 64
         commands = [
-            "build -f Containerfile.zfs --target zfs-rpms --build-arg ZFS_BUILD_MODE=unsigned-testing "
+            f"build -f Containerfile.zfs --target zfs-rpms --build-arg FEDORA_BASE={base} "
+            "--build-arg ZFS_BUILD_MODE=unsigned-testing "
             "-t localhost/zfs-rpms:testing .",
-            "build --no-cache -f Containerfile.zfs-runtime --build-arg ZFS_RPM_IMAGE=localhost/zfs-rpms:testing "
+            f"build --no-cache -f Containerfile.zfs-runtime --build-arg FEDORA_BASE={base} "
+            "--build-arg ZFS_RPM_IMAGE=localhost/zfs-rpms:testing "
             "--build-arg ZFS_RPM_TRUST_MODE=unsigned-testing -t localhost/zfs-runtime:testing .",
-            "build -f Containerfile.nirius -t localhost/nirius-artifact:testing .",
+            f"build -f Containerfile.nirius --build-arg FEDORA_BASE={base} -t localhost/nirius-artifact:testing .",
             "build -f Containerfile.fedora --build-arg BASE_IMAGE=localhost/zfs-runtime:testing "
             "--build-arg NIRIUS_IMAGE=localhost/nirius-artifact:testing "
             "--build-arg ZFS_BUILD_MODE=unsigned-testing -t localhost/fedora-niri:testing .",
@@ -272,13 +280,58 @@ podman() {
             with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
                 summary = Path(tmp) / "summary"
                 result, _ = run(mock + shell,
+                                TAG_JSON=json.dumps({"Digest": "sha256:" + "a" * 64}), INSPECT_STATUS="0",
                                 RUNNER_TEMP=tmp, GITHUB_STEP_SUMMARY=str(summary), FAIL_BUILD=failure)
                 self.assertEqual(result.returncode == 0, failure == "no-failure", result.stderr)
                 self.assertEqual(summary.exists(), failure == "no-failure")
                 self.assertEqual(result.stdout.splitlines(), commands[:index + 1])
+                self.assertEqual(result.stderr.splitlines(), ["inspect docker://quay.io/fedora/fedora-bootc:44"])
                 if failure == "no-failure":
+                    self.assertIn(f"Fedora base used: {base}\n", summary.read_text())
                     self.assertIn("Secure Boot disabled", summary.read_text())
                     self.assertIn("acceptance are not established", summary.read_text())
+
+        cases = [(json.dumps({"Digest": value}), "0") for value in
+                 (None, "", 42, [], {}, "sha256:abc", "sha256:" + "g" * 64,
+                  "sha256:" + "a" * 64 + "\n", "sha256:" + "a" * 64 + "\r",
+                  "sha256:" + "a" * 64 + "\nINJECT=1")]
+        cases += [("{}", "0"), ("not-json", "0"),
+                  (json.dumps({"Digest": "sha256:" + "a" * 64}), "1")]
+        for tag_json, status in cases:
+            with self.subTest(tag_json=tag_json, status=status), tempfile.TemporaryDirectory() as tmp:
+                summary = Path(tmp) / "summary"
+                result, _ = run(mock + shell, TAG_JSON=tag_json, INSPECT_STATUS=status,
+                                FAIL_BUILD="no-failure", GITHUB_STEP_SUMMARY=str(summary))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+                self.assertFalse(summary.exists())
+
+        # A later run must follow the newly resolved tag, not a repository pin.
+        with tempfile.TemporaryDirectory() as tmp:
+            summary = Path(tmp) / "summary"
+            result, _ = run(mock + shell, TAG_JSON=json.dumps({"Digest": "sha256:" + "b" * 64}),
+                            INSPECT_STATUS="0", FAIL_BUILD="no-failure", GITHUB_STEP_SUMMARY=str(summary))
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.splitlines(),
+                             [command.replace("a" * 64, "b" * 64) for command in commands])
+            self.assertIn(base.replace("a" * 64, "b" * 64), summary.read_text())
+
+    def test_fedora_dependency_floating_defaults(self):
+        root = Path(__file__).resolve().parents[1]
+        for filename, stages in {
+            "Containerfile.zfs": ["zfs-source", "zfs-runtime"],
+            "Containerfile.zfs-runtime": ["zfs-runtime"],
+            "Containerfile.zfs-sign": ["zfs-signer"],
+            "Containerfile.nirius": ["builder"],
+        }.items():
+            with self.subTest(filename=filename):
+                text = (root / filename).read_text()
+                default = "ARG FEDORA_BASE=quay.io/fedora/fedora-bootc:44\n"
+                self.assertEqual(text.count(default), 1)
+                self.assertLess(text.index(default), text.index("FROM "))
+                self.assertNotIn("@sha256:", text)
+                for stage in stages:
+                    self.assertIn(f"FROM ${{FEDORA_BASE}} AS {stage}\n", text)
 
     def test_testing_artifact_and_publication_with_mocked_io(self):
         upload = block(FEDORA_BUILD, "      - name: Upload testing image")

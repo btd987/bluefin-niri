@@ -2,9 +2,10 @@
 # Use --no-cache for verified builds: mounted artifact changes may reuse layers.
 # podman build -f Containerfile.zfs-runtime --build-arg ZFS_RPM_IMAGE=localhost/zfs-rpms-test-proof:latest -t localhost/zfs-runtime:proof .
 ARG ZFS_RPM_IMAGE=localhost/zfs-rpms-test-proof:latest
+ARG FEDORA_BASE=quay.io/fedora/fedora-bootc:44
 FROM ${ZFS_RPM_IMAGE} AS zfs-rpm-artifacts
 
-FROM quay.io/fedora/fedora-bootc:44@sha256:cc0e99fb83e3cf2bd34b073535cfa656dc817dfd29911a1c47546bb013e1c845 AS zfs-runtime
+FROM ${FEDORA_BASE} AS zfs-runtime
 ARG ZFS_RPM_TRUST_MODE=unsigned-proof
 ARG ZFS_RPM_SIGNING_FINGERPRINT
 RUN if [ "$ZFS_RPM_TRUST_MODE" = verified ]; then \

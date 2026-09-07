@@ -97,13 +97,18 @@ podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bazzite-nvidia --build-arg 
 `TAG` defaults to `stable`; `BASE_REF` accepts an explicit digest and otherwise defaults to `${BASE_IMAGE}:${TAG}`. For the complete Fedora image, build every dependency in order on the same machine:
 
 ```bash
-podman build -f Containerfile.zfs --target zfs-rpms --build-arg ZFS_BUILD_MODE=unsigned-testing -t localhost/zfs-rpms:testing .
-podman build --no-cache -f Containerfile.zfs-runtime --build-arg ZFS_RPM_IMAGE=localhost/zfs-rpms:testing --build-arg ZFS_RPM_TRUST_MODE=unsigned-testing -t localhost/zfs-runtime:testing .
-podman build -f Containerfile.nirius -t localhost/nirius-artifact:testing .
+set -euo pipefail
+DIGEST=$(skopeo inspect docker://quay.io/fedora/fedora-bootc:44 | jq -er '
+  .Digest | select(type == "string") |
+  select(test("^sha256:[0-9a-f]{64}$") and length == 71)')
+FEDORA_BASE="quay.io/fedora/fedora-bootc:44@${DIGEST}"
+podman build -f Containerfile.zfs --target zfs-rpms --build-arg FEDORA_BASE="$FEDORA_BASE" --build-arg ZFS_BUILD_MODE=unsigned-testing -t localhost/zfs-rpms:testing .
+podman build --no-cache -f Containerfile.zfs-runtime --build-arg FEDORA_BASE="$FEDORA_BASE" --build-arg ZFS_RPM_IMAGE=localhost/zfs-rpms:testing --build-arg ZFS_RPM_TRUST_MODE=unsigned-testing -t localhost/zfs-runtime:testing .
+podman build -f Containerfile.nirius --build-arg FEDORA_BASE="$FEDORA_BASE" -t localhost/nirius-artifact:testing .
 podman build -f Containerfile.fedora --build-arg BASE_IMAGE=localhost/zfs-runtime:testing --build-arg NIRIUS_IMAGE=localhost/nirius-artifact:testing --build-arg ZFS_BUILD_MODE=unsigned-testing -t localhost/fedora-niri:testing .
 ```
 
-Fedora uses the Containerfiles' pinned Fedora 44 digest; repository packages still resolve at build time, so this is not bit-for-bit reproducibility. `system_files/` is staged at `/tmp/system_files` for installation by `build.sh`.
+Fedora tracks `quay.io/fedora/fedora-bootc:44`. Dependency Containerfiles default `FEDORA_BASE` to that floating tag for direct local builds. CI and the commands above resolve it once, validate the digest, and pass the same immutable reference to ZFS RPM, ZFS runtime and Nirius builds; final assembly inherits that ZFS runtime. If using the optional `Containerfile.zfs-sign`, pass the same `--build-arg FEDORA_BASE="$FEDORA_BASE"` there too. CI records the reference in its build summary, and Nirius provenance records the actual builder argument (a floating tag when using the default). Repository packages still resolve at build time, so this is not bit-for-bit reproducibility. `system_files/` is staged at `/tmp/system_files` for installation by `build.sh`.
 
 Source checksum/signature verification, exact-kernel ZFS checks, dependency validation, runtime artifact allowlists, tests and container validation remain required. Unsigned local RPM trust is limited to explicit testing mode and trusted-build packages; Fedora repository signature checks stay enabled with no silent fallback. Hash pins alone do not authenticate publishers; DevPod's pin lacks independent upstream checksum/signature authentication.
 

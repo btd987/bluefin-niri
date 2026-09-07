@@ -250,8 +250,7 @@ class ZFSRuntimeTests(unittest.TestCase):
 
     def test_container_contract_and_syntax(self):
         subprocess.run(["bash", "-n", str(SCRIPT)], check=True)
-        source = (ROOT / "Containerfile.zfs").read_text()
-        base = source.splitlines()[3].split(" AS ")[0]
+        base = "FROM ${FEDORA_BASE}"
         for filename, stage in (("Containerfile.zfs", "zfs-builder,source=/out"),
                                 ("Containerfile.zfs-runtime", "zfs-rpm-artifacts,source=/")):
             text = (ROOT / filename).read_text()
@@ -275,7 +274,8 @@ class ZFSRealTrustTests(unittest.TestCase):
         # the host. No private key is needed; use only disposable proof images.
         image = os.environ["ZFS_SIGNED_TEST_IMAGE"]
         fingerprint = os.environ["ZFS_TEST_FINGERPRINT"]
-        base = (ROOT / "Containerfile.zfs-runtime").read_text().split("FROM ")[2].split()[0]
+        text = (ROOT / "Containerfile.zfs-runtime").read_text()
+        base = os.environ.get("FEDORA_BASE") or text.split("ARG FEDORA_BASE=", 1)[1].splitlines()[0]
         cases = [
             ("", "", "expected full uppercase"),
             ("B" * 40 if fingerprint != "B" * 40 else "A" * 40, "", "fingerprint mismatch"),

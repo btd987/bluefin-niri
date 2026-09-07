@@ -2,6 +2,15 @@
 
 ## Current Status
 
+- [x] Inspect tracked Fedora base references and callers; initial worktree clean.
+- [x] Replace permanent Fedora base pins with floating defaults and one validated
+  per-run CI reference shared by dependency builds and recorded in provenance.
+- [x] Verify regression tests: `/usr/bin/python3 -m unittest discover -s tests -v`
+  ran 225 tests, 204 passed, 21 opt-in skips, no failures. Workflow shell syntax
+  tests, `bash -n scripts/build-nirius.sh` and `git diff --check` passed.
+- [ ] Validate the tag-tracking change with a real dependency/image build and
+  operator-performed hardware acceptance; neither was run for this change.
+
 Fedora is unsigned testing with Secure Boot disabled, using `testing` and dated
 testing tags only. Hardware acceptance is separate from build validation and is
 not a production signing/reviewer gate on test publication.

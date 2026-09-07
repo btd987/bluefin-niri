@@ -28,7 +28,7 @@
 - Never include private keys or credentials in images, artifacts, logs, or Git. Do not claim Secure Boot support or require temporary certificate enrollment for unsigned builds.
 - Record actual build and test results separately from operator-performed hardware acceptance; production acceptance is not required before test publication. Never add a flag falsely asserting tests passed.
 - Keep the unsigned-testing workflow and build paths operative, with `.github/workflows/fedora-testing.yml` displayed as `Fedora Niri Testing`, not the retired `fedora-candidate.yml`. Keep tests, README, and `todo.md` aligned; editing this document alone does not enable publication.
-- Fedora currently uses the Containerfiles' pinned Fedora 44 digest.
+- Fedora dependency Containerfiles default `FEDORA_BASE` to `quay.io/fedora/fedora-bootc:44`. CI resolves that tag once per run to a validated digest reference, passes the same reference to every Fedora dependency build, and records it in build summaries and Nirius provenance. Do not permanently pin the base digest in the repository.
 
 ## Desktop and Custom Features
 

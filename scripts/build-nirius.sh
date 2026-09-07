@@ -1,5 +1,6 @@
 #!/usr/bin/bash
 set -euo pipefail
+: "${FEDORA_BASE:?FEDORA_BASE must match the builder image reference}"
 
 readonly version=0.9.0
 readonly source_sha256=82478b606e560f82f59c8f580da0a9eb88448c08b69996cba55029aa03cabfbe
@@ -23,7 +24,7 @@ install -Dm755 target/release/niriusd /out/niriusd
 {
     printf 'name=nirius\nversion=%s\nsource_url=%s\nsource_sha256=%s\n' \
         "$version" "$source_url" "$source_sha256"
-    printf '%s\n' 'builder_base=quay.io/fedora/fedora-bootc:44@sha256:cc0e99fb83e3cf2bd34b073535cfa656dc817dfd29911a1c47546bb013e1c845'
+    printf 'builder_base=%s\n' "$FEDORA_BASE"
     printf 'architecture=%s\n' "$(uname -m)"
     rustc --version
     cargo --version
