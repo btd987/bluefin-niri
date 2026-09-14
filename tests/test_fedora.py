@@ -26,6 +26,7 @@ rpm() {
     fi
 }
 dnf5() { record dnf5 "$@"; }
+flatpak() { record flatpak "$@"; }
 systemctl() { record systemctl "$@"; }
 cp() { record cp "$@"; }
 install() { record install "$@"; }
@@ -88,12 +89,17 @@ class FedoraTests(unittest.TestCase):
             "iwlwifi-mvm-firmware", "iwlwifi-mld-firmware",
             "xdg-desktop-portal-gtk", "xdg-utils", "shared-mime-info",
             "polkit", "mate-polkit", "at-spi2-core", "orca", "brightnessctl",
-            "playerctl", "wl-clipboard", "podman", "flatpak", "sudo", "curl",
-            "ca-certificates", "tar", "gzip", "coreutils",
+            "playerctl", "wl-clipboard", "podman", "flatpak", "firefox",
+            "gnome-software", "sudo", "curl", "ca-certificates", "tar",
+            "gzip", "coreutils",
         }.issubset(packages))
         self.assertNotIn("polkit-gnome", packages)
-        self.assertTrue(calls[3].startswith(
-            'dnf5 install -y --repo=fedora --repo=updates '
+        self.assertEqual(calls[3], (
+            "flatpak remote-add --system --if-not-exists flathub "
+            "https://dl.flathub.org/repo/flathub.flatpakrepo"
+        ))
+        self.assertTrue(calls[4].startswith(
+            'dnf5 install -y --repo=fedora --repo=updates --repo=updates-archive '
             '--exclude=kernel-core --exclude=kernel-modules --exclude=kernel-modules-core '
             'kernel-modules-extra-uname-r = 7.1.13-200.fc44.x86_64 '
         ))
@@ -104,8 +110,8 @@ class FedoraTests(unittest.TestCase):
             'pcsc-lite', 'pcsc-lite-ccid', 'opensc', 'gnupg2-scdaemon',
             'yubikey-manager', 'libertas-firmware', 'usb_modeswitch',
             'usb_modeswitch-data', 'ModemManager', 'NetworkManager-wwan',
-        }.issubset(calls[3].split()))
-        self.assertEqual(calls[4:], [
+        }.issubset(calls[4].split()))
+        self.assertEqual(calls[5:], [
             "mise",
             "shared",
             "cp -a /tmp/fedora_files/. /",
@@ -114,6 +120,8 @@ class FedoraTests(unittest.TestCase):
             "test -x /usr/libexec/polkit-mate-authentication-agent-1",
             "test -x /usr/bin/bootc",
             "test -x /usr/bin/flatpak",
+            "test -x /usr/bin/firefox",
+            "test -x /usr/bin/gnome-software",
             "test -f /usr/lib/systemd/user/niri.service",
             "systemctl --global preset niri-polkit-agent.service",
             "systemctl preset bootc-fetch-apply-updates.timer fedora-niri-os-update.timer fedora-niri-flatpak-update.timer",

@@ -41,6 +41,8 @@ Switching images does not migrate user configurations or storage. OS rollback do
 
 Images include native `noctalia` (not `noctalia-shell` or Quickshell), xwayland-satellite, Kitty, kanshi, gamescope, khal and shared custom recipes. Defaults live in `/etc/niri/config.kdl`; existing user configs are never replaced automatically.
 
+The Fedora testing variant also includes Firefox and GNOME Software. GNOME Software uses the system-wide Flathub remote to search for and install Flatpak applications; operating-system updates remain managed by the existing bootc update service.
+
 1. Back up `${XDG_CONFIG_HOME:-$HOME/.config}/niri`, any custom `NIRI_CONFIG`, and all external included files before editing. Preserve rules, outputs, inputs, shortcuts and appearance; do not replace entire configs or apply unrelated dotfiles.
 2. Preferably before updating, keep a terminal open and run `systemctl --user disable --now dms.service`. If the unit is already removed, inspect user units and autostart entries for obsolete DMS activation; preserve its settings for rollback.
 3. Compare the active config with `/etc/niri/config.kdl` and make targeted edits. Remove obsolete DMS and `qs`/`quickshell -c noctalia-shell` startup references, including includes/scripts. Retain legacy settings for reference; v5 does not migrate v4 settings.

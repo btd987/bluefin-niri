@@ -2,14 +2,34 @@
 
 ## Current Status
 
+- [x] Inspect the Fedora desktop package and Flatpak setup; Firefox and GNOME
+  Software are available as Fedora 44 packages, while only the Flatpak CLI was
+  previously present.
+- [x] Add Firefox, GNOME Software and system-wide Flathub access to the Fedora
+  testing variant. The standard suite ran 225 tests: 204 passed, 21 opt-in
+  tests skipped, and no tests failed. `bash -n build.sh` and `git diff --check`
+  passed.
+- [x] Build the complete dependency chain and `localhost/fedora-niri:browser-test`
+  image from Fedora base digest `sha256:c42272e0eed33a6eac747dbc6b1bd9f362f6a878183223ffbc6d5371dd4dc0fe`.
+  Image ID `315d8da951ab` passed build-time package, exact-kernel ZFS and bootc
+  validation with the existing bootc lint warnings.
+- [x] Validate Firefox 155.0, GNOME Software 50.4, desktop launchers and the
+  GNOME Software Flatpak plugin in the built image. The system Flathub remote
+  resolved metadata and installed GNOME Sudoku in an ephemeral container.
+- [ ] Boot the updated image and verify graphical Firefox and GNOME Software
+  launch, Flatpak installation and update/rollback on hardware.
+- [x] Preserve exact-kernel package installation when a floating Fedora base
+  kernel rotates out of `updates` by allowing Fedora's signed `updates-archive`
+  in the hardware transaction; `7.2.4-200.fc44` was resolved there.
 - [x] Inspect tracked Fedora base references and callers; initial worktree clean.
 - [x] Replace permanent Fedora base pins with floating defaults and one validated
   per-run CI reference shared by dependency builds and recorded in provenance.
 - [x] Verify regression tests: `/usr/bin/python3 -m unittest discover -s tests -v`
   ran 225 tests, 204 passed, 21 opt-in skips, no failures. Workflow shell syntax
   tests, `bash -n scripts/build-nirius.sh` and `git diff --check` passed.
-- [ ] Validate the tag-tracking change with a real dependency/image build and
-  operator-performed hardware acceptance; neither was run for this change.
+- [x] Validate the tag-tracking change with a real same-base dependency and
+  complete image build.
+- [ ] Perform booted hardware acceptance for the tag-tracking build.
 
 Fedora is unsigned testing with Secure Boot disabled, using `testing` and dated
 testing tags only. Hardware acceptance is separate from build validation and is

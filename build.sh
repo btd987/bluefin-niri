@@ -427,6 +427,8 @@ install_fedora_niri_foundation() {
         wl-clipboard \
         podman \
         flatpak \
+        firefox \
+        gnome-software \
         sudo \
         curl \
         ca-certificates \
@@ -434,8 +436,11 @@ install_fedora_niri_foundation() {
         gzip \
         coreutils
 
+    flatpak remote-add --system --if-not-exists \
+        flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+
     # Fedora-only hardware baseline; repository signatures remain required.
-    dnf5 install -y --repo=fedora --repo=updates \
+    dnf5 install -y --repo=fedora --repo=updates --repo=updates-archive \
         --exclude=kernel-core --exclude=kernel-modules --exclude=kernel-modules-core \
         "kernel-modules-extra-uname-r = $kernel" \
         alsa-ucm \
@@ -470,6 +475,8 @@ install_fedora_niri_foundation() {
     test -x /usr/libexec/polkit-mate-authentication-agent-1
     test -x /usr/bin/bootc
     test -x /usr/bin/flatpak
+    test -x /usr/bin/firefox
+    test -x /usr/bin/gnome-software
     test -f /usr/lib/systemd/user/niri.service
     systemctl --global preset niri-polkit-agent.service
     systemctl preset bootc-fetch-apply-updates.timer fedora-niri-os-update.timer fedora-niri-flatpak-update.timer
