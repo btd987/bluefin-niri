@@ -90,8 +90,8 @@ class FedoraTests(unittest.TestCase):
             "xdg-desktop-portal-gtk", "xdg-utils", "shared-mime-info",
             "polkit", "mate-polkit", "at-spi2-core", "orca", "brightnessctl",
             "playerctl", "wl-clipboard", "podman", "flatpak", "firefox",
-            "gnome-software", "sudo", "curl", "ca-certificates", "tar",
-            "gzip", "coreutils",
+            "gnome-software", "glibc-langpack-en", "sudo", "curl",
+            "ca-certificates", "tar", "gzip", "coreutils",
         }.issubset(packages))
         self.assertNotIn("polkit-gnome", packages)
         self.assertEqual(calls[3], (

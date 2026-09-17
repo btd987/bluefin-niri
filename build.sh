@@ -429,6 +429,7 @@ install_fedora_niri_foundation() {
         flatpak \
         firefox \
         gnome-software \
+        glibc-langpack-en \
         sudo \
         curl \
         ca-certificates \

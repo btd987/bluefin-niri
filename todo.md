@@ -2,6 +2,13 @@
 
 ## Current Status
 
+- [x] Add the Fedora English glibc language pack so `en_US.UTF-8` resolves
+  instead of producing `LC_ALL`/`setlocale` missing-locale errors. The previous
+  image reproduced the warning and exposed only `C`, `C.utf8`, and `POSIX`.
+  The standard suite ran 225 tests: 204 passed, 21 opt-in tests skipped, and no
+  tests failed. `bash -n build.sh` and `git diff --check` passed.
+- [ ] Boot the locale-fixed Fedora image and confirm a login shell reports
+  `en_US.UTF-8` without locale warnings.
 - [x] Inspect the Fedora desktop package and Flatpak setup; Firefox and GNOME
   Software are available as Fedora 44 packages, while only the Flatpak CLI was
   previously present.
