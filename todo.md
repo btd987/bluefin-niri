@@ -8,7 +8,9 @@
   the bootc image; an isolated real preinstall resolved Firefox 156.0 from the
   GPG-verified remote and confirmed the sandbox exposes all devices and PC/SC.
   The standard suite ran 226 tests: 205 passed, 21 opt-in tests skipped, and no
-  tests failed. `bash -n build.sh` and `git diff --check` passed.
+  tests failed locally. The first CI run exposed and then fixed an Ubuntu-only
+  offline unit-test mock that covered `ExecStart` but not `ExecStartPre` or
+  `ExecStartPost`. `bash -n build.sh` and `git diff --check` passed.
 - [ ] Boot the updated Fedora image and verify first-boot Firefox installation,
   desktop launch, profile migration behavior, and Bitwarden FIDO2/WebAuthn with
   a physical YubiKey. Flatpak permission checks do not establish token access.

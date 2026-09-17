@@ -136,7 +136,9 @@ class FedoraServiceTests(unittest.TestCase):
                 for executable in ("/usr/libexec/polkit-mate-authentication-agent-1",
                                    "/usr/bin/bootc", "/usr/bin/flatpak"):
                     if not os.access(executable, os.X_OK):
-                        text = text.replace(f"ExecStart={executable}", "ExecStart=/bin/true")
+                        for directive in ("ExecStart", "ExecStartPre", "ExecStartPost"):
+                            text = text.replace(f"{directive}={executable}",
+                                                f"{directive}=/bin/true")
                 (temp / path.name).write_text(text)
                 names.append(str(temp / path.name))
             for target in ("graphical-session.target", "network-online.target",
