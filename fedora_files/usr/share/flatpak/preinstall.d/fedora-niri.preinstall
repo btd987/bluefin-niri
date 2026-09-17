@@ -1,0 +1,4 @@
+[Flatpak Preinstall org.mozilla.firefox]
+Install=true
+Branch=stable
+IsRuntime=false

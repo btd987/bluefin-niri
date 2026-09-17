@@ -1,6 +1,8 @@
 """Fedora-only service policy; never start services or update the host."""
 
+import base64
 import configparser
+import hashlib
 import os
 from pathlib import Path
 import shlex
@@ -54,13 +56,18 @@ class FedoraServiceTests(unittest.TestCase):
                 self.assertEqual(result.returncode, expected, result.stderr)
 
     def test_updates_stage_os_and_update_only_system_flatpaks(self):
-        for name, command in (
-            ("os", "/usr/bin/bootc upgrade"),
-            ("flatpak", "/usr/bin/flatpak update --system --noninteractive"),
-        ):
-            service = unit("system", f"fedora-niri-{name}-update.service")
-            self.assertEqual(dict(service["Service"]),
-                             {"Type": "oneshot", "ExecStart": command})
+        os_update = unit("system", "fedora-niri-os-update.service")
+        self.assertEqual(dict(os_update["Service"]),
+                         {"Type": "oneshot", "ExecStart": "/usr/bin/bootc upgrade"})
+        flatpak_update = unit("system", "fedora-niri-flatpak-update.service")
+        self.assertEqual(dict(flatpak_update["Service"]), {
+            "Type": "oneshot",
+            "ExecStartPre": "/usr/bin/flatpak remote-add --system --if-not-exists --from flathub /usr/share/fedora-niri/flathub.flatpakrepo",
+            "ExecStart": "/usr/bin/flatpak preinstall --system --assumeyes --noninteractive",
+            "ExecStartPost": "/usr/bin/flatpak update --system --noninteractive",
+        })
+        self.assertEqual(flatpak_update["Install"]["WantedBy"], "multi-user.target")
+        for service in (os_update, flatpak_update):
             self.assertEqual(service["Unit"]["Wants"], "network-online.target")
             self.assertEqual(service["Unit"]["After"], "network-online.target")
         self.assertEqual(
@@ -89,8 +96,28 @@ class FedoraServiceTests(unittest.TestCase):
         self.assertEqual([line for line in presets.splitlines() if not line.startswith("#")], [
             "disable bootc-fetch-apply-updates.timer",
             "enable fedora-niri-os-update.timer",
+            "enable fedora-niri-flatpak-update.service",
             "enable fedora-niri-flatpak-update.timer",
         ])
+
+    def test_firefox_flatpak_preinstall(self):
+        remote = configparser.ConfigParser(interpolation=None)
+        remote.optionxform = str
+        remote.read(OVERLAY / "usr/share/fedora-niri/flathub.flatpakrepo")
+        self.assertEqual(remote["Flatpak Repo"]["Url"], "https://dl.flathub.org/repo/")
+        self.assertEqual(remote["Flatpak Repo"]["Title"], "Flathub")
+        key = base64.b64decode(remote["Flatpak Repo"]["GPGKey"], validate=True)
+        self.assertEqual(hashlib.sha256(key).hexdigest(),
+                         "8bdc20abc4e19c0796460beb5bfe0e7aa4138716999e19c6f2dbdd78cc41aeaa")
+
+        preinstall = configparser.ConfigParser(interpolation=None)
+        preinstall.optionxform = str
+        preinstall.read(OVERLAY / "usr/share/flatpak/preinstall.d/fedora-niri.preinstall")
+        self.assertEqual(dict(preinstall["Flatpak Preinstall org.mozilla.firefox"]), {
+            "Install": "true",
+            "Branch": "stable",
+            "IsRuntime": "false",
+        })
 
     def test_overlay_is_not_in_shared_staging(self):
         for path in OVERLAY.rglob("*"):

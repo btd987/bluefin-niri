@@ -2,6 +2,16 @@
 
 ## Current Status
 
+- [x] Replace the Fedora Firefox RPM with the Mozilla Flathub application used
+  by the other desktop variants. Flatpak's OS preinstall mechanism installs it
+  into mutable system storage on a connected boot instead of baking `/var` into
+  the bootc image; an isolated real preinstall resolved Firefox 156.0 from the
+  GPG-verified remote and confirmed the sandbox exposes all devices and PC/SC.
+  The standard suite ran 226 tests: 205 passed, 21 opt-in tests skipped, and no
+  tests failed. `bash -n build.sh` and `git diff --check` passed.
+- [ ] Boot the updated Fedora image and verify first-boot Firefox installation,
+  desktop launch, profile migration behavior, and Bitwarden FIDO2/WebAuthn with
+  a physical YubiKey. Flatpak permission checks do not establish token access.
 - [x] Add the Fedora English glibc language pack so `en_US.UTF-8` resolves
   instead of producing `LC_ALL`/`setlocale` missing-locale errors. The previous
   image reproduced the warning and exposed only `C`, `C.utf8`, and `POSIX`.

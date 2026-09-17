@@ -427,7 +427,6 @@ install_fedora_niri_foundation() {
         wl-clipboard \
         podman \
         flatpak \
-        firefox \
         gnome-software \
         glibc-langpack-en \
         sudo \
@@ -436,9 +435,6 @@ install_fedora_niri_foundation() {
         tar \
         gzip \
         coreutils
-
-    flatpak remote-add --system --if-not-exists \
-        flathub https://dl.flathub.org/repo/flathub.flatpakrepo
 
     # Fedora-only hardware baseline; repository signatures remain required.
     dnf5 install -y --repo=fedora --repo=updates --repo=updates-archive \
@@ -476,11 +472,13 @@ install_fedora_niri_foundation() {
     test -x /usr/libexec/polkit-mate-authentication-agent-1
     test -x /usr/bin/bootc
     test -x /usr/bin/flatpak
-    test -x /usr/bin/firefox
+    test -f /usr/share/fedora-niri/flathub.flatpakrepo
+    test -f /usr/share/flatpak/preinstall.d/fedora-niri.preinstall
     test -x /usr/bin/gnome-software
     test -f /usr/lib/systemd/user/niri.service
     systemctl --global preset niri-polkit-agent.service
-    systemctl preset bootc-fetch-apply-updates.timer fedora-niri-os-update.timer fedora-niri-flatpak-update.timer
+    systemctl preset bootc-fetch-apply-updates.timer fedora-niri-os-update.timer \
+        fedora-niri-flatpak-update.service fedora-niri-flatpak-update.timer
     # Shared ThinkPad defaults must not enable fan control on arbitrary hardware.
     systemctl disable thinkfan.service
     # Fedora storage scheduling is opt-in, including after system presets.
