@@ -11,7 +11,7 @@ BUILD = (Path(__file__).resolve().parents[1] / "build.sh").read_text()
 FOUNDATION = re.search(
     r"^install_fedora_niri_foundation\(\) \{\n.*?^\}", BUILD, re.M | re.S
 ).group()
-DISPATCH = BUILD[BUILD.index('case "${VARIANT}" in'):]
+DISPATCH = re.search(r'^case "\$\{VARIANT\}" in\n.*', BUILD, re.M | re.S).group()
 MOCKS = r'''
 record() {
     printf '%s\n' "$*"

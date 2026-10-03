@@ -203,6 +203,71 @@ EOF
     niri validate --config /etc/niri/config.kdl
 }
 
+install_bazzite_openrazer() (
+    set -euo pipefail
+    case "${VARIANT}" in
+        bazzite-niri|bazzite-niri-nvidia) ;;
+        *) return 0 ;;
+    esac
+
+    local kernel version release module vermagic path
+    kernel=$(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n')
+    version=$(rpm -q openrazer --qf '%{VERSION}\n')
+    release=$(rpm -q openrazer --qf '%{VERSION}-%{RELEASE}\n')
+    if [[ -z "$kernel" || "$kernel" == *$'\n'* || -z "$release" || "$release" == *$'\n'* ]]; then
+        echo "ERROR: Expected one inherited Bazzite kernel and OpenRazer package" >&2
+        exit 1
+    fi
+
+    local tmp_dir
+    tmp_dir=$(mktemp -d)
+    trap 'rm -rf -- "$tmp_dir"' EXIT
+    for module in razerkbd razermouse razerkraken razeraccessory; do
+        vermagic=$(modinfo -k "$kernel" -F vermagic "$module")
+        if [[ "${vermagic%% *}" != "$kernel" || $(modinfo -k "$kernel" -F version "$module") != "$version" ]]; then
+            echo "ERROR: Inherited OpenRazer module $module does not match kernel/package" >&2
+            exit 1
+        fi
+        path=$(modinfo -k "$kernel" -F filename "$module")
+        sha256sum "$path" >> "$tmp_dir/modules.sha256"
+    done
+
+    # Only the GUI comes from upstream OBS: its daemon would pull in DKMS,
+    # conflicting with Bazzite's prebuilt modules. Keep this repo disabled.
+    cat > "$tmp_dir/niri-polychromatic.repo" << 'EOF'
+[niri-polychromatic]
+name=Polychromatic (OpenRazer upstream)
+baseurl=https://download.opensuse.org/repositories/hardware:/razer/Fedora_$releasever/
+enabled=0
+includepkgs=polychromatic
+gpgcheck=1
+gpgkey=https://download.opensuse.org/repositories/hardware:/razer/Fedora_$releasever/repodata/repomd.xml.key
+EOF
+    dnf5 config-manager addrepo --from-repofile="$tmp_dir/niri-polychromatic.repo"
+    # Use Bazzite's existing Terra repository/key, scoped to userspace only.
+    # Exact versions fail closed when matching packages are no longer available.
+    dnf5 install -y --repo=fedora --repo=updates --repo=terra --repo=niri-polychromatic \
+        --setopt=terra.includepkgs=openrazer-daemon,python3-openrazer \
+        --setopt=terra.gpgcheck=1 --setopt=install_weak_deps=False \
+        --exclude='kernel*' --exclude=openrazer --exclude='kmod-openrazer*' --exclude='*openrazer*kmod*' --exclude='akmod*' --exclude='dkms*' \
+        "openrazer-daemon-$release" "python3-openrazer-$release" polychromatic
+
+    test "$(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n')" = "$kernel"
+    test "$(rpm -q openrazer --qf '%{VERSION}-%{RELEASE}\n')" = "$release"
+    sha256sum --check --strict "$tmp_dir/modules.sha256"
+    rpm -q openrazer-daemon python3-openrazer polychromatic
+    python3 -c 'import openrazer; import openrazer_daemon'
+    test -x /usr/bin/polychromatic-controller
+    test -f /usr/share/applications/polychromatic.desktop
+    test -f /usr/lib/udev/rules.d/99-razer.rules
+    test -x /usr/lib/udev/razer_mount
+    test -f /usr/lib/systemd/user/openrazer-daemon.service
+    test -f /usr/share/dbus-1/services/org.razer.service
+    getent group plugdev
+    # D-Bus activation starts the packaged user service on demand; no second
+    # Niri startup command or system-wide daemon is needed.
+)
+
 install_ublue_niri_noctalia() {
     echo "Installing Niri compositor + native Noctalia shell..."
 
@@ -259,6 +324,8 @@ install_ublue_niri_noctalia() {
         pinentry-gnome3
 
     install_gamescope_if_missing
+
+    install_bazzite_openrazer
 
     # Install asusctl for NVIDIA variant (ASUS ROG/TUF laptop support)
     if [[ "${VARIANT}" == *"nvidia"* ]]; then

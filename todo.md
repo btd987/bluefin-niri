@@ -2,6 +2,27 @@
 
 ## Current Status
 
+- [x] Inspect Bazzite OpenRazer inheritance: cached regular and NVIDIA bases
+  contain OpenRazer 3.12.4 modules for their respective kernels; the keyboard
+  modules report the `ublue kernel` signer. Userspace daemon/library are absent.
+- [x] Implement Bazzite-only OpenRazer userspace and native Polychromatic
+  installation with scoped, signature-checked repositories and exact inherited
+  package matching. All four module checksums remain unchanged across installation.
+- [x] Build both complete Bazzite Niri images against cached `44.20260902`
+  stable bases: regular image `4da7400ed88e`, NVIDIA image `baca11e11ded`.
+  Both contain OpenRazer 3.12.4 and Polychromatic 0.9.8, pass `dnf5 check`,
+  and run the Polychromatic version probe with a writable temporary HOME.
+  Neither installs upstream DKMS or a duplicate daemon XDG autostart entry.
+  Bootc lint passes with four warnings (extlinux, runtime files, logs and
+  `/var` cache content); builds also report inherited conflicting plugdev
+  sysusers definitions. These images have not been published or boot-tested.
+- [x] Run 232 standard tests: 211 passed, 21 opt-in skips, no failures after
+  correcting the Fedora dispatch test to select the top-level case statement.
+  `bash -n build.sh` and `git diff --check` pass.
+- [ ] Build current stable/daily Bazzite variants and perform physical-device
+  checks for detection, settings, reconnect and suspend/resume. Bluefin and
+  Fedora OpenRazer integration are out of scope.
+
 - [x] Replace the Fedora Firefox RPM with the Mozilla Flathub application used
   by the other desktop variants. Flatpak's OS preinstall mechanism installs it
   into mutable system storage on a connected boot instead of baking `/var` into

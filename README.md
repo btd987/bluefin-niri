@@ -64,6 +64,35 @@ XF86MonBrightnessDown { spawn "noctalia" "msg" "brightness-down"; }
 
 Fedora keeps Thinkfan inactive until appropriate setup; existing Bluefin/Bazzite fan defaults remain. Keep firmware-managed fans and stock thermald platform/Intel checks. Camera, modem and reader support depends on actual device IDs. No automatic fingerprint/PAM enrollment, token/key changes, FCC unlocking or fan tuning is provided. Preserve password/recovery access before optional authentication changes; fingerprint login does not unlock a password-encrypted keyring. Do not overwrite custom PAM settings or reset tokens to diagnose hardware.
 
+## Razer Devices (Bazzite)
+
+The Bazzite Niri builds include [OpenRazer](https://openrazer.github.io/) userspace
+support and native [Polychromatic](https://polychromatic.app/) for supported
+Razer peripherals. Both Bazzite variants retain their upstream kernel modules;
+the build checks each variant's own kernel and installs matching daemon/library
+packages. Bluefin and Fedora do not include this integration.
+
+After booting an image containing this change, grant your login user device
+access and reboot:
+
+```bash
+sudo gpasswd -a "$USER" plugdev
+systemctl reboot
+```
+
+Launch **Polychromatic** from the application launcher, or run
+`polychromatic-controller`. The packaged OpenRazer user service is D-Bus
+activated; do not add a duplicate Niri startup command or run the daemon as root.
+For settings restoration before opening the GUI, optionally enable the packaged
+service with `systemctl --user enable --now openrazer-daemon.service` after reboot.
+Custom effects and tray startup are configured through Polychromatic.
+
+For diagnostics, check `id -nG`, `systemctl --user status openrazer-daemon.service`
+and `journalctl --user -u openrazer-daemon.service -b`. Device support and available
+controls depend on the model and connection mode; consult the upstream supported
+device list. Build checks do not establish physical-device or Secure Boot
+acceptance. See [verified progress and pending checks](todo.md).
+
 ## Optional Commands
 
 Discover the installed inventory instead of assuming commands from another image:
