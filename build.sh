@@ -276,6 +276,20 @@ install_ublue_niri_noctalia() {
     ghostty --version
     test -f /usr/share/applications/com.mitchellh.ghostty.desktop
 
+    # Refresh Bazzite's inherited updater without changing its service wrapper.
+    # uupd 1.5 fixes successful exit codes when an update module has failed.
+    case "${VARIANT}" in
+        bazzite-niri|bazzite-niri-nvidia)
+            dnf5 install -y --repo=fedora --repo=updates \
+                --repo=copr:copr.fedorainfracloud.org:ublue-os:packages \
+                --setopt=copr:copr.fedorainfracloud.org:ublue-os:packages.includepkgs=uupd \
+                --setopt=copr:copr.fedorainfracloud.org:ublue-os:packages.gpgcheck=1 \
+                --setopt=copr:copr.fedorainfracloud.org:ublue-os:packages.skip_if_unavailable=False \
+                'uupd >= 1.5.0'
+            rpm -q --whatprovides 'uupd >= 1.5.0'
+            ;;
+    esac
+
     # Native v5 comes from Fedora, not the legacy Quickshell/Terra packages.
     dnf5 install -y --repo=fedora --repo=updates 'noctalia >= 5.0.0'
 
