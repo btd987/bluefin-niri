@@ -39,7 +39,7 @@ Switching images does not migrate user configurations or storage. OS rollback do
 
 ## Desktop and Migration
 
-Images include native `noctalia` (not `noctalia-shell` or Quickshell), xwayland-satellite, Kitty, kanshi, gamescope, khal and shared custom recipes. Defaults live in `/etc/niri/config.kdl`; existing user configs are never replaced automatically.
+Images include native `noctalia` (not `noctalia-shell` or Quickshell), xwayland-satellite, Kitty, Ghostty, kanshi, gamescope, khal and shared custom recipes. Ghostty comes from the community `scottames/ghostty` COPR listed in its [installation documentation](https://ghostty.org/docs/install/binary#fedora); launch it from the application launcher or run `ghostty`. Kitty remains the default `Mod+T` terminal. Defaults live in `/etc/niri/config.kdl`; existing user configs are never replaced automatically.
 
 The Fedora testing variant installs Mozilla Firefox from Flathub on the first connected boot and includes GNOME Software. Firefox has access to security-token devices and PC/SC through its published Flatpak permissions. GNOME Software uses the same system-wide Flathub remote to search for and install applications; operating-system updates remain managed by the existing bootc update service. Switching from the former Fedora Firefox RPM does not migrate profiles automatically: stop both browsers and back up `~/.mozilla` before selectively importing data into `~/.var/app/org.mozilla.firefox/.mozilla`, or use Firefox Sync. Keep another Bitwarden recovery or two-step login method available until the YubiKey flow is verified.
 
@@ -69,13 +69,19 @@ Fedora keeps Thinkfan inactive until appropriate setup; existing Bluefin/Bazzite
 The Bazzite Niri builds include [OpenRazer](https://openrazer.github.io/) userspace
 support and native [Polychromatic](https://polychromatic.app/) for supported
 Razer peripherals. Both Bazzite variants retain their upstream kernel modules;
-the build checks each variant's own kernel and installs matching daemon/library
-packages. Bluefin and Fedora do not include this integration.
+the build checks each variant's own kernel and matches the daemon/library to the
+driver's upstream version. Terra packaging revisions of the userspace and common
+udev files may advance independently; kernel modules remain unchanged. Bluefin
+and Fedora do not include this integration.
 
 After booting an image containing this change, grant your login user device
-access and reboot:
+access and reboot. On Atomic images, `plugdev` may exist only in the immutable
+`/usr/lib/group`. Copy its existing entry into `/etc/group` before using
+`gpasswd`; the guarded command preserves its numeric ID and existing members
+and does nothing if the local entry already exists:
 
 ```bash
+sudo bash -c 'if ! grep -q "^plugdev:" /etc/group; then getent group plugdev >> /etc/group; fi'
 sudo gpasswd -a "$USER" plugdev
 systemctl reboot
 ```
@@ -91,7 +97,7 @@ For diagnostics, check `id -nG`, `systemctl --user status openrazer-daemon.servi
 and `journalctl --user -u openrazer-daemon.service -b`. Device support and available
 controls depend on the model and connection mode; consult the upstream supported
 device list. Build checks do not establish physical-device or Secure Boot
-acceptance. See [verified progress and pending checks](todo.md).
+acceptance.
 
 ## Optional Commands
 
@@ -125,24 +131,18 @@ podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bazzite --build-arg VARIANT
 podman build --build-arg BASE_IMAGE=ghcr.io/ublue-os/bazzite-nvidia --build-arg VARIANT=bazzite-niri-nvidia -t bazzite-niri-nvidia:test .
 ```
 
-`TAG` defaults to `stable`; `BASE_REF` accepts an explicit digest and otherwise defaults to `${BASE_IMAGE}:${TAG}`. For the complete Fedora image, build every dependency in order on the same machine:
+`TAG` defaults to `stable`; `BASE_REF` accepts an explicit digest and otherwise defaults to `${BASE_IMAGE}:${TAG}`. For the complete Fedora testing image, use the same assembly script as CI from the repository root (requires Podman, Skopeo and jq):
 
 ```bash
-set -euo pipefail
-DIGEST=$(skopeo inspect docker://quay.io/fedora/fedora-bootc:44 | jq -er '
-  .Digest | select(type == "string") |
-  select(test("^sha256:[0-9a-f]{64}$") and length == 71)')
-FEDORA_BASE="quay.io/fedora/fedora-bootc:44@${DIGEST}"
-podman build -f Containerfile.zfs --target zfs-rpms --build-arg FEDORA_BASE="$FEDORA_BASE" --build-arg ZFS_BUILD_MODE=unsigned-testing -t localhost/zfs-rpms:testing .
-podman build --no-cache -f Containerfile.zfs-runtime --build-arg FEDORA_BASE="$FEDORA_BASE" --build-arg ZFS_RPM_IMAGE=localhost/zfs-rpms:testing --build-arg ZFS_RPM_TRUST_MODE=unsigned-testing -t localhost/zfs-runtime:testing .
-podman build -f Containerfile.nirius --build-arg FEDORA_BASE="$FEDORA_BASE" -t localhost/nirius-artifact:testing .
-podman build -f Containerfile.fedora --build-arg BASE_IMAGE=localhost/zfs-runtime:testing --build-arg NIRIUS_IMAGE=localhost/nirius-artifact:testing --build-arg ZFS_BUILD_MODE=unsigned-testing -t localhost/fedora-niri:testing .
+bash scripts/build-fedora-testing.sh
 ```
 
-Fedora tracks `quay.io/fedora/fedora-bootc:44`. Dependency Containerfiles default `FEDORA_BASE` to that floating tag for direct local builds. CI and the commands above resolve it once, validate the digest, and pass the same immutable reference to ZFS RPM, ZFS runtime and Nirius builds; final assembly inherits that ZFS runtime. If using the optional `Containerfile.zfs-sign`, pass the same `--build-arg FEDORA_BASE="$FEDORA_BASE"` there too. CI records the reference in its build summary, and Nirius provenance records the actual builder argument (a floating tag when using the default). Repository packages still resolve at build time, so this is not bit-for-bit reproducibility. `system_files/` is staged at `/tmp/system_files` for installation by `build.sh`.
+Fedora tracks `quay.io/fedora/fedora-bootc:44`. Dependency Containerfiles default `FEDORA_BASE` to that floating tag for direct local builds. The assembly script resolves it once, validates the digest, and builds every dependency on the same machine using that immutable reference; final assembly inherits the ZFS runtime. It does not publish images. For custom builds using the optional `Containerfile.zfs-sign`, pass the same resolved `FEDORA_BASE` to every dependency. CI records the reference in its build summary, and Nirius provenance records the actual builder argument (a floating tag when using the default). Repository packages still resolve at build time, so this is not bit-for-bit reproducibility. `system_files/` is staged at `/tmp/system_files` for installation by `build.sh`.
+
+Static desktop templates live in `system_files/usr/share/niri-system/defaults/`. `build.sh` applies them after package installation so RPM defaults cannot replace them; early staging does not activate the templates. Existing user configuration is not replaced.
 
 Source checksum/signature verification, exact-kernel ZFS checks, dependency validation, runtime artifact allowlists, tests and container validation remain required. Unsigned local RPM trust is limited to explicit testing mode and trusted-build packages; Fedora repository signature checks stay enabled with no silent fallback. Hash pins alone do not authenticate publishers; DevPod's pin lacks independent upstream checksum/signature authentication.
 
 `.github/workflows/fedora-testing.yml` (**Fedora Niri Testing**) builds all dependency images/packages on the same runner, never from developer-local artifacts. PRs/pushes validate only; scheduled/manual trusted `main` runs may publish through a separate narrowly scoped `packages: write` job using `GITHUB_TOKEN`. Release publication waits for all three release builds. No signing keys, generated test keys, certificate enrollment, protected environment or additional reviewers are required for Fedora testing. Never put private keys or credentials in images, artifacts, logs or Git, or imply Secure Boot support.
 
-Run `/usr/bin/python3 -m unittest discover -s tests -v` with PyYAML and Just 1.57.0 available. Container/artifact tests are opt-in; skips are not passes. Build/source checks are separate from booted hardware, storage/restore and update/rollback acceptance, which remain pending for the hardware-expanded image. No flag may assert unperformed tests passed; hardware acceptance is not a production gate on test publication. See [active tasks](todo.md).
+Run `/usr/bin/python3 -m unittest discover -s tests -v` with PyYAML and Just 1.57.0 available. Container/artifact tests are opt-in; skips are not passes. Build/source checks are separate from booted hardware, storage/restore and update/rollback acceptance, which remain pending for the hardware-expanded image. No flag may assert unperformed tests passed; hardware acceptance is not a production gate on test publication.

@@ -99,16 +99,6 @@ enable_libvirt_service() {
     fi
 }
 
-configure_default_niri_session() {
-    # Set Niri as default session for new users via AccountsService template.
-    mkdir -p /usr/share/accountsservice/user-templates
-    cat > /usr/share/accountsservice/user-templates/standard << 'EOF'
-[User]
-Session=niri
-SystemAccount=false
-EOF
-}
-
 configure_os_release() {
     local niri_variant="$1"
     local niri_variant_id="$2"
@@ -210,11 +200,10 @@ install_bazzite_openrazer() (
         *) return 0 ;;
     esac
 
-    local kernel version release module vermagic path
+    local kernel version module vermagic path package
     kernel=$(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n')
     version=$(rpm -q openrazer --qf '%{VERSION}\n')
-    release=$(rpm -q openrazer --qf '%{VERSION}-%{RELEASE}\n')
-    if [[ -z "$kernel" || "$kernel" == *$'\n'* || -z "$release" || "$release" == *$'\n'* ]]; then
+    if [[ -z "$kernel" || "$kernel" == *$'\n'* || -z "$version" || "$version" == *$'\n'* ]]; then
         echo "ERROR: Expected one inherited Bazzite kernel and OpenRazer package" >&2
         exit 1
     fi
@@ -244,16 +233,19 @@ gpgcheck=1
 gpgkey=https://download.opensuse.org/repositories/hardware:/razer/Fedora_$releasever/repodata/repomd.xml.key
 EOF
     dnf5 config-manager addrepo --from-repofile="$tmp_dir/niri-polychromatic.repo"
-    # Use Bazzite's existing Terra repository/key, scoped to userspace only.
-    # Exact versions fail closed when matching packages are no longer available.
+    # Match the upstream driver version, not Terra's packaging release: the
+    # daemon needs the same-release common udev files (openrazer), whose RPM
+    # revision can advance before Bazzite's base. Never replace kernel modules.
     dnf5 install -y --repo=fedora --repo=updates --repo=terra --repo=niri-polychromatic \
-        --setopt=terra.includepkgs=openrazer-daemon,python3-openrazer \
-        --setopt=terra.gpgcheck=1 --setopt=install_weak_deps=False \
-        --exclude='kernel*' --exclude=openrazer --exclude='kmod-openrazer*' --exclude='*openrazer*kmod*' --exclude='akmod*' --exclude='dkms*' \
-        "openrazer-daemon-$release" "python3-openrazer-$release" polychromatic
+        --setopt=terra.includepkgs=openrazer,openrazer-daemon,python3-openrazer \
+        --setopt=terra.gpgcheck=1 --setopt=terra.skip_if_unavailable=False --setopt=install_weak_deps=False \
+        --exclude='kernel*' --exclude='kmod-openrazer*' --exclude='*openrazer*kmod*' --exclude='akmod*' --exclude='dkms*' \
+        "openrazer-$version" "openrazer-daemon-$version" "python3-openrazer-$version" polychromatic
 
     test "$(rpm -q kernel-core --qf '%{VERSION}-%{RELEASE}.%{ARCH}\n')" = "$kernel"
-    test "$(rpm -q openrazer --qf '%{VERSION}-%{RELEASE}\n')" = "$release"
+    for package in openrazer openrazer-daemon python3-openrazer; do
+        test "$(rpm -q "$package" --qf '%{VERSION}\n')" = "$version"
+    done
     sha256sum --check --strict "$tmp_dir/modules.sha256"
     rpm -q openrazer-daemon python3-openrazer polychromatic
     python3 -c 'import openrazer; import openrazer_daemon'
@@ -277,6 +269,12 @@ install_ublue_niri_noctalia() {
     copr_install_isolated yalter/niri \
         niri \
         xwayland-satellite
+
+    # Community Fedora package listed in Ghostty's upstream installation docs.
+    copr_install_isolated scottames/ghostty ghostty
+    rpm -q ghostty
+    ghostty --version
+    test -f /usr/share/applications/com.mitchellh.ghostty.desktop
 
     # Native v5 comes from Fedora, not the legacy Quickshell/Terra packages.
     dnf5 install -y --repo=fedora --repo=updates 'noctalia >= 5.0.0'
@@ -349,15 +347,7 @@ install_ublue_niri_noctalia() {
     systemctl enable mullvad-daemon.service
 
     # Polkit rule: allow libvirt group to manage VMs without password
-    mkdir -p /etc/polkit-1/rules.d
-    cat > /etc/polkit-1/rules.d/50-libvirt.rules << 'EOF'
-polkit.addRule(function(action, subject) {
-    if (action.id == "org.libvirt.unix.manage" &&
-        subject.isInGroup("libvirt")) {
-        return polkit.Result.YES;
-    }
-});
-EOF
+    install -Dm0644 /tmp/system_files/usr/share/niri-system/defaults/50-libvirt.rules /etc/polkit-1/rules.d/50-libvirt.rules
 
     # Set zsh as default shell for new users
     sed -i 's|SHELL=/bin/bash|SHELL=/bin/zsh|' /etc/default/useradd
@@ -365,29 +355,18 @@ EOF
     # Enable kanshi via systemd preset; Noctalia starts only through Niri.
     # Disable xwaylandvideobridge (Bazzite ships it for KDE, but it creates a visible
     # white window on Niri since Niri handles screen sharing via portals natively)
-    mkdir -p /usr/lib/systemd/user-preset
-    cat > /usr/lib/systemd/user-preset/80-bluefin-niri.preset << 'EOF'
-enable kanshi.service
-disable app-org.kde.xwaylandvideobridge@autostart.service
-EOF
+    install -Dm0644 /tmp/system_files/usr/share/niri-system/defaults/80-bluefin-niri.preset /usr/lib/systemd/user-preset/80-bluefin-niri.preset
 
     # Override the package's XDG autostart entry, including for existing users.
-    mkdir -p /etc/xdg/autostart
-    cat > /etc/xdg/autostart/org.kde.xwaylandvideobridge.desktop << 'EOF'
-[Desktop Entry]
-Hidden=true
-EOF
+    install -Dm0644 /tmp/system_files/usr/share/niri-system/defaults/org.kde.xwaylandvideobridge.desktop /etc/xdg/autostart/org.kde.xwaylandvideobridge.desktop
 
     # Portal configuration for Niri
     # Uses GNOME portal (works well with Niri) + GTK fallback
-    mkdir -p /usr/share/xdg-desktop-portal
-    cat > /usr/share/xdg-desktop-portal/niri-portals.conf << 'EOF'
-[preferred]
-default=gnome;gtk
-EOF
+    install -Dm0644 /tmp/system_files/usr/share/niri-system/defaults/niri-portals.conf /usr/share/xdg-desktop-portal/niri-portals.conf
 
     configure_niri_noctalia
-    configure_default_niri_session
+    # Set Niri as default session for new users via AccountsService template.
+    install -Dm0644 /tmp/system_files/usr/share/niri-system/defaults/standard-user /usr/share/accountsservice/user-templates/standard
 
     rpm -q noctalia
     noctalia --version

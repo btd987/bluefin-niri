@@ -5,8 +5,8 @@
 - Inspect the code first. State assumptions and ask when requirements are unclear.
 - Make the smallest correct change. Avoid unrequested features and abstractions.
 - Preserve unrelated work and existing style. Remove only dead code your changes create.
-- For multi-step work, use tasks and update `todo.md` with verified progress.
-- Run relevant tests and report failures, limitations, and untested behavior honestly.
+- For multi-step work, track and report verified progress.
+- Do not add new tests or test cases unless explicitly requested. Keep existing tests compatible with requested changes, run relevant existing tests, and report failures, limitations, and untested behavior honestly.
 - Keep public documentation generic: no personal hardware inventories, local usernames/paths, private logs, or personal contact details. Use the public maintainer handle and a noreply address for project-authored commits; preserve third-party attribution.
 
 ## Images
@@ -27,7 +27,7 @@
 - Allow unsigned local RPMs only in an explicit test-build mode for packages produced by the trusted build. Keep Fedora repository signature checks enabled; never silently fall back from signed verification.
 - Never include private keys or credentials in images, artifacts, logs, or Git. Do not claim Secure Boot support or require temporary certificate enrollment for unsigned builds.
 - Record actual build and test results separately from operator-performed hardware acceptance; production acceptance is not required before test publication. Never add a flag falsely asserting tests passed.
-- Keep the unsigned-testing workflow and build paths operative, with `.github/workflows/fedora-testing.yml` displayed as `Fedora Niri Testing`, not the retired `fedora-candidate.yml`. Keep tests, README, and `todo.md` aligned; editing this document alone does not enable publication.
+- Keep the unsigned-testing workflow and build paths operative, with `.github/workflows/fedora-testing.yml` displayed as `Fedora Niri Testing`, not the retired `fedora-candidate.yml`. Keep tests and README aligned; editing this document alone does not enable publication.
 - Fedora dependency Containerfiles default `FEDORA_BASE` to `quay.io/fedora/fedora-bootc:44`. CI resolves that tag once per run to a validated digest reference, passes the same reference to every Fedora dependency build, and records it in build summaries and Nirius provenance. Do not permanently pin the base digest in the repository.
 
 ## Desktop and Custom Features

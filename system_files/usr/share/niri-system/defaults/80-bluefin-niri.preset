@@ -1,0 +1,2 @@
+enable kanshi.service
+disable app-org.kde.xwaylandvideobridge@autostart.service

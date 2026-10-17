@@ -19,8 +19,7 @@ rpm() {
         kernel-core:*)
             if [[ "$CASE" == multiple-kernels ]]; then printf 'other\n'; fi
             printf 'test-kernel\n' ;;
-        openrazer:*RELEASE*) printf '3.12.4-1.fc44\n' ;;
-        openrazer:*) printf '3.12.4\n' ;;
+        openrazer:*|openrazer-daemon:*|python3-openrazer:*) printf '3.12.4\n' ;;
     esac
 }
 modinfo() {
@@ -76,11 +75,11 @@ class OpenRazerTests(unittest.TestCase):
             with self.subTest(variant=variant):
                 result, calls, repo = self.run_installer(variant)
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertIn("openrazer-daemon-3.12.4-1.fc44 python3-openrazer-3.12.4-1.fc44 polychromatic", calls)
+                self.assertIn("openrazer-3.12.4 openrazer-daemon-3.12.4 python3-openrazer-3.12.4 polychromatic", calls)
                 self.assertIn("--repo=fedora --repo=updates --repo=terra --repo=niri-polychromatic", calls)
-                self.assertIn("--setopt=terra.includepkgs=openrazer-daemon,python3-openrazer", calls)
+                self.assertIn("--setopt=terra.includepkgs=openrazer,openrazer-daemon,python3-openrazer", calls)
                 self.assertIn("--setopt=terra.gpgcheck=1", calls)
-                for exclusion in ("kernel*", "openrazer", "kmod-openrazer*", "akmod*", "dkms*"):
+                for exclusion in ("kernel*", "kmod-openrazer*", "akmod*", "dkms*"):
                     self.assertIn(f"--exclude={exclusion}", calls)
                 config = configparser.ConfigParser()
                 config.read_string(repo)

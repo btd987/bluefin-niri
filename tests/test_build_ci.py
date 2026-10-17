@@ -32,6 +32,7 @@ def block(text, header):
 WORKFLOW = (Path(__file__).resolve().parents[1] / ".github/workflows/build.yml").read_text()
 CLEANUP = (Path(__file__).resolve().parents[1] / ".github/workflows/cleanup.yml").read_text()
 TESTING = (Path(__file__).resolve().parents[1] / ".github/workflows/fedora-testing.yml").read_text()
+FEDORA_ASSEMBLY = (Path(__file__).resolve().parents[1] / "scripts/build-fedora-testing.sh").read_text()
 FEDORA_BUILD = block(TESTING, "  build:")
 FEDORA_PUBLISH = block(TESTING, "  publish:")
 BUILD = block(WORKFLOW, "  build:")
@@ -223,6 +224,7 @@ skopeo() {
         self.assertNotIn("    if:", FEDORA_BUILD.split("    steps:")[0])
         for forbidden in ("secrets", "login@", "skopeo copy", "podman push"):
             self.assertNotIn(forbidden, FEDORA_BUILD)
+            self.assertNotIn(forbidden, FEDORA_ASSEMBLY)
         for forbidden in ("checkout@", "podman build", "podman run"):
             self.assertNotIn(forbidden, FEDORA_PUBLISH)
         self.assertEqual(re.findall(r"\$\{\{ secrets\.(\w+) \}\}", TESTING), ["GITHUB_TOKEN"])
@@ -231,7 +233,8 @@ skopeo() {
                           "mktemp", "openssl", "type: boolean", "continue-on-error:",
                           "Containerfile.zfs-sign", "localhost/zfs-rpms-test-proof", "/tmp/opencode",
                           ":proof", ":candidate", "stable", "production-validation"):
-            self.assertNotIn(forbidden, TESTING)
+            for text in (TESTING, FEDORA_ASSEMBLY):
+                self.assertNotIn(forbidden, text)
 
     def test_testing_publish_gates(self):
         gate = re.search(r"^    if: (.+)$", FEDORA_PUBLISH, re.M).group(1)
@@ -251,7 +254,8 @@ skopeo() {
 
     def test_testing_build_sequence_with_mocked_builds(self):
         step = block(FEDORA_BUILD, "      - name: Build Fedora testing image")
-        shell = textwrap.dedent(block(step, "        run: |"))
+        self.assertEqual(step.strip(), "run: bash scripts/build-fedora-testing.sh")
+        shell = FEDORA_ASSEMBLY
         mock = '''
 skopeo() {
   printf '%s\\n' "$*" >&2
@@ -367,6 +371,7 @@ skopeo() { printf '%s\\n' "$*"; }
     def test_shell_syntax(self):
         scripts = re.findall(r"^        run: \|\n((?:          .*\n|\n)+)", WORKFLOW + TESTING, re.M)
         self.assertGreaterEqual(len(scripts), 5)
+        scripts.append(FEDORA_ASSEMBLY)
         for shell in scripts:
             with self.subTest(script=shell.splitlines()[0]):
                 result = subprocess.run(["bash", "-n"], input=textwrap.dedent(shell), text=True, capture_output=True)
