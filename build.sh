@@ -286,7 +286,7 @@ install_ublue_niri_noctalia() {
                 --setopt=copr:copr.fedorainfracloud.org:ublue-os:packages.gpgcheck=1 \
                 --setopt=copr:copr.fedorainfracloud.org:ublue-os:packages.skip_if_unavailable=False \
                 'uupd >= 1.5.0'
-            rpm -q --whatprovides 'uupd >= 1.5.0'
+            rpm -q uupd
             ;;
     esac
 
