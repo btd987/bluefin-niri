@@ -1,0 +1,6 @@
+.git/
+.claude/
+.opencode/
+.proof/
+**/__pycache__/
+**/*.py[cod]

@@ -17,9 +17,9 @@ COMMANDS = {
     "setup-libvirt", "virt-network-start", "virt-status", "virt-monitor",
     "virt-manager", "download-windows-iso", "vfio-check", "vfio-kargs",
     "vfio-setup", "setup-podman-desktop", "setup-backup", "backup-status",
-    "storage-status", "configure-zfs", "enable-snapshot-timers",
+    "storage-status", "enable-snapshot-timers",
     "configure-snapshot-schedule", "setup-devpod-podman",
-    "setup-raid-maintenance", "zfs-storage-enroll", "zfs-storage-status",
+    "setup-raid-maintenance",
 }
 
 
@@ -84,7 +84,7 @@ class JustTests(unittest.TestCase):
     def test_all_forwarded_dry_runs(self):
         for command in sorted(COMMANDS):
             with self.subTest(command=command):
-                args = ("home",) if command in ("backup-status", "zfs-storage-enroll") else ()
+                args = ("home",) if command == "backup-status" else ()
                 expected = self.just(self.shared, "--dry-run", command, *args)
                 for entry in (self.compat, self.root):
                     actual = self.just(entry, "--dry-run", command, *args)

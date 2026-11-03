@@ -31,10 +31,6 @@ def block(text, header):
 
 WORKFLOW = (Path(__file__).resolve().parents[1] / ".github/workflows/build.yml").read_text()
 CLEANUP = (Path(__file__).resolve().parents[1] / ".github/workflows/cleanup.yml").read_text()
-TESTING = (Path(__file__).resolve().parents[1] / ".github/workflows/fedora-testing.yml").read_text()
-FEDORA_ASSEMBLY = (Path(__file__).resolve().parents[1] / "scripts/build-fedora-testing.sh").read_text()
-FEDORA_BUILD = block(TESTING, "  build:")
-FEDORA_PUBLISH = block(TESTING, "  publish:")
 BUILD = block(WORKFLOW, "  build:")
 PUBLISH = block(WORKFLOW, "  publish:")
 
@@ -186,192 +182,24 @@ skopeo() {
         self.assertIn("...dailyDated.slice(7)", CLEANUP)
 
     def test_full_standard_suite_with_dependencies_before_builds(self):
-        for job in (block(WORKFLOW, "  validate:"), FEDORA_BUILD):
-            install = block(job, "      - name: Install test dependencies")
-            tests = block(job, "      - name: Run standard unit tests")
-            self.assertIn("sudo apt-get update && sudo apt-get install -y python3-yaml", install)
-            self.assertIn('cargo install --locked --version 1.57.0 just --root "$RUNNER_TEMP/just"', install)
-            self.assertIn('echo "$RUNNER_TEMP/just/bin" >> "$GITHUB_PATH"', install)
-            self.assertIn("command -v just", tests)
-            self.assertIn("/usr/bin/python3 -c 'import yaml'", tests)
-            self.assertIn("/usr/bin/python3 -m unittest discover -s tests -v", tests)
-            self.assertNotIn(" -p ", tests)
-            self.assertNotIn("continue-on-error", job)
-            self.assertLess(job.index(install), job.index(tests))
-            self.assertNotIn("BACKUP_REAL_CONTAINER", job)
-            self.assertNotIn("NIRIUS_ARTIFACT_DIR", job)
-            self.assertNotIn("NIRI_TEST_IMAGE", job)
-        self.assertLess(TESTING.index("      - name: Run standard unit tests"),
-                        TESTING.index("      - name: Build Fedora testing image"))
-
-    def test_testing_permissions_and_triggers(self):
-        self.assertTrue(TESTING.startswith("name: Fedora Niri Testing\n"))
-        self.assertFalse((Path(__file__).resolve().parents[1] /
-                          ".github/workflows/fedora-candidate.yml").exists())
-        self.assertEqual(re.findall(r"^  (\w+):", block(TESTING, "on:"), re.M),
-                         ["pull_request", "push", "schedule", "workflow_dispatch"])
-        self.assertEqual(block(TESTING, "  push:").strip(), "branches:\n      - main")
-        self.assertEqual(re.findall(r'cron: "([^"]+)"', TESTING), ["17 13 * * *"])
-        self.assertNotIn('cron: "17 13 * * *"', WORKFLOW)
-        self.assertEqual(re.findall(r"^  (\w+):", block(TESTING, "jobs:"), re.M),
-                         ["build", "publish"])
-        for text, header in ((TESTING, "permissions:"), (FEDORA_BUILD, "    permissions:")):
-            self.assertEqual(block(text, header).strip(), "contents: read")
-        self.assertEqual(block(FEDORA_PUBLISH, "    permissions:").strip(), "packages: write")
-        self.assertEqual(TESTING.count("packages: write"), 1)
-        self.assertIn("    needs: build\n", FEDORA_PUBLISH)
-        self.assertIn("          persist-credentials: false", FEDORA_BUILD)
-        self.assertNotIn("    if:", FEDORA_BUILD.split("    steps:")[0])
-        for forbidden in ("secrets", "login@", "skopeo copy", "podman push"):
-            self.assertNotIn(forbidden, FEDORA_BUILD)
-            self.assertNotIn(forbidden, FEDORA_ASSEMBLY)
-        for forbidden in ("checkout@", "podman build", "podman run"):
-            self.assertNotIn(forbidden, FEDORA_PUBLISH)
-        self.assertEqual(re.findall(r"\$\{\{ secrets\.(\w+) \}\}", TESTING), ["GITHUB_TOKEN"])
-        for forbidden in ("environment:", "inputs:", "inputs.", "secrets[", "reviewers",
-                          "SIGNING_KEY", "SIGNING_CERT", "FINGERPRINT", "--secret", "--privileged",
-                          "mktemp", "openssl", "type: boolean", "continue-on-error:",
-                          "Containerfile.zfs-sign", "localhost/zfs-rpms-test-proof", "/tmp/opencode",
-                          ":proof", ":candidate", "stable", "production-validation"):
-            for text in (TESTING, FEDORA_ASSEMBLY):
-                self.assertNotIn(forbidden, text)
-
-    def test_testing_publish_gates(self):
-        gate = re.search(r"^    if: (.+)$", FEDORA_PUBLISH, re.M).group(1)
-        for name in ("Export testing image", "Upload testing image"):
-            self.assertIn(f"        if: {gate}\n", block(FEDORA_BUILD, f"      - name: {name}"))
-        expression = (gate.replace("github.ref", '"$REF"')
-                      .replace("github.event_name", '"$EVENT"').replace("github.repository", '"$REPO"'))
-        for repo in ("btd987/bluefin-niri", "fork/bluefin-niri"):
-            for event in ("pull_request", "push", "schedule", "workflow_dispatch", "pull_request_target"):
-                for ref in ("refs/heads/main", "refs/heads/feature", "refs/tags/main", "refs/pull/12/merge"):
-                    with self.subTest(repo=repo, event=event, ref=ref):
-                        result, _ = run(f"[[ {expression} ]]", REPO=repo, REF=ref, EVENT=event)
-                        self.assertIn(result.returncode, (0, 1), result.stderr)
-                        expected = (repo == "btd987/bluefin-niri" and ref == "refs/heads/main"
-                                    and event in ("schedule", "workflow_dispatch"))
-                        self.assertEqual(result.returncode == 0, expected)
-
-    def test_testing_build_sequence_with_mocked_builds(self):
-        step = block(FEDORA_BUILD, "      - name: Build Fedora testing image")
-        self.assertEqual(step.strip(), "run: bash scripts/build-fedora-testing.sh")
-        shell = FEDORA_ASSEMBLY
-        mock = '''
-skopeo() {
-  printf '%s\\n' "$*" >&2
-  printf '%s' "$TAG_JSON"
-  return "$INSPECT_STATUS"
-}
-podman() {
-  printf '%s\\n' "$*"
-  [[ "$*" != *"$FAIL_BUILD"* ]]
-}
-'''
-        base = "quay.io/fedora/fedora-bootc:44@sha256:" + "a" * 64
-        commands = [
-            f"build -f Containerfile.zfs --target zfs-rpms --build-arg FEDORA_BASE={base} "
-            "--build-arg ZFS_BUILD_MODE=unsigned-testing "
-            "-t localhost/zfs-rpms:testing .",
-            f"build --no-cache -f Containerfile.zfs-runtime --build-arg FEDORA_BASE={base} "
-            "--build-arg ZFS_RPM_IMAGE=localhost/zfs-rpms:testing "
-            "--build-arg ZFS_RPM_TRUST_MODE=unsigned-testing -t localhost/zfs-runtime:testing .",
-            f"build -f Containerfile.nirius --build-arg FEDORA_BASE={base} -t localhost/nirius-artifact:testing .",
-            "build -f Containerfile.fedora --build-arg BASE_IMAGE=localhost/zfs-runtime:testing "
-            "--build-arg NIRIUS_IMAGE=localhost/nirius-artifact:testing "
-            "--build-arg ZFS_BUILD_MODE=unsigned-testing -t localhost/fedora-niri:testing .",
-        ]
-        for index, failure in enumerate(commands + ["no-failure"]):
-            with self.subTest(failure=failure), tempfile.TemporaryDirectory() as tmp:
-                summary = Path(tmp) / "summary"
-                result, _ = run(mock + shell,
-                                TAG_JSON=json.dumps({"Digest": "sha256:" + "a" * 64}), INSPECT_STATUS="0",
-                                RUNNER_TEMP=tmp, GITHUB_STEP_SUMMARY=str(summary), FAIL_BUILD=failure)
-                self.assertEqual(result.returncode == 0, failure == "no-failure", result.stderr)
-                self.assertEqual(summary.exists(), failure == "no-failure")
-                self.assertEqual(result.stdout.splitlines(), commands[:index + 1])
-                self.assertEqual(result.stderr.splitlines(), ["inspect docker://quay.io/fedora/fedora-bootc:44"])
-                if failure == "no-failure":
-                    self.assertIn(f"Fedora base used: {base}\n", summary.read_text())
-                    self.assertIn("Secure Boot disabled", summary.read_text())
-                    self.assertIn("acceptance are not established", summary.read_text())
-
-        cases = [(json.dumps({"Digest": value}), "0") for value in
-                 (None, "", 42, [], {}, "sha256:abc", "sha256:" + "g" * 64,
-                  "sha256:" + "a" * 64 + "\n", "sha256:" + "a" * 64 + "\r",
-                  "sha256:" + "a" * 64 + "\nINJECT=1")]
-        cases += [("{}", "0"), ("not-json", "0"),
-                  (json.dumps({"Digest": "sha256:" + "a" * 64}), "1")]
-        for tag_json, status in cases:
-            with self.subTest(tag_json=tag_json, status=status), tempfile.TemporaryDirectory() as tmp:
-                summary = Path(tmp) / "summary"
-                result, _ = run(mock + shell, TAG_JSON=tag_json, INSPECT_STATUS=status,
-                                FAIL_BUILD="no-failure", GITHUB_STEP_SUMMARY=str(summary))
-                self.assertNotEqual(result.returncode, 0)
-                self.assertEqual(result.stdout, "")
-                self.assertFalse(summary.exists())
-
-        # A later run must follow the newly resolved tag, not a repository pin.
-        with tempfile.TemporaryDirectory() as tmp:
-            summary = Path(tmp) / "summary"
-            result, _ = run(mock + shell, TAG_JSON=json.dumps({"Digest": "sha256:" + "b" * 64}),
-                            INSPECT_STATUS="0", FAIL_BUILD="no-failure", GITHUB_STEP_SUMMARY=str(summary))
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(result.stdout.splitlines(),
-                             [command.replace("a" * 64, "b" * 64) for command in commands])
-            self.assertIn(base.replace("a" * 64, "b" * 64), summary.read_text())
-
-    def test_fedora_dependency_floating_defaults(self):
-        root = Path(__file__).resolve().parents[1]
-        for filename, stages in {
-            "Containerfile.zfs": ["zfs-source", "zfs-runtime"],
-            "Containerfile.zfs-runtime": ["zfs-runtime"],
-            "Containerfile.zfs-sign": ["zfs-signer"],
-            "Containerfile.nirius": ["builder"],
-        }.items():
-            with self.subTest(filename=filename):
-                text = (root / filename).read_text()
-                default = "ARG FEDORA_BASE=quay.io/fedora/fedora-bootc:44\n"
-                self.assertEqual(text.count(default), 1)
-                self.assertLess(text.index(default), text.index("FROM "))
-                self.assertNotIn("@sha256:", text)
-                for stage in stages:
-                    self.assertIn(f"FROM ${{FEDORA_BASE}} AS {stage}\n", text)
-
-    def test_testing_artifact_and_publication_with_mocked_io(self):
-        upload = block(FEDORA_BUILD, "      - name: Upload testing image")
-        download = block(FEDORA_PUBLISH, "      - name: Download testing image")
-        for step in (upload, download):
-            self.assertIn("          name: fedora-niri-testing", step)
-            self.assertIn("          path: ${{ runner.temp }}/release/", step)
-        for setting in ("compression-level: 0", "retention-days: 1", "if-no-files-found: error"):
-            self.assertIn(setting, upload)
-        export = textwrap.dedent(block(block(FEDORA_BUILD, "      - name: Export testing image"), "        run: |"))
-        push = textwrap.dedent(block(block(FEDORA_PUBLISH, "      - name: Push to GHCR"), "        run: |"))
-        mock = '''
-podman() { printf '%s\\n' "$*"; }
-date() { [[ "$*" == '-u +%Y%m%d' ]] && printf '20260906'; }
-skopeo() { printf '%s\\n' "$*"; }
-'''
-        with tempfile.TemporaryDirectory() as tmp:
-            result, _ = run(mock + export + "\n" + push, RUNNER_TEMP=tmp)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual((Path(tmp) / "release/tags.txt").read_text(), "testing\ntesting-20260906\n")
-            self.assertEqual(result.stdout.splitlines(), [
-                f"save --format oci-archive --output {tmp}/release/image.tar localhost/fedora-niri:testing",
-                f"copy oci-archive:{tmp}/release/image.tar docker://ghcr.io/btd987/fedora-niri:testing",
-                f"copy oci-archive:{tmp}/release/image.tar docker://ghcr.io/btd987/fedora-niri:testing-20260906",
-            ])
-            for tag in ("stable", "latest", "testing-20260906/other", "testing-20260906\r"):
-                with self.subTest(tag=tag):
-                    (Path(tmp) / "release/tags.txt").write_text(tag + "\n")
-                    result, _ = run(mock + push, RUNNER_TEMP=tmp)
-                    self.assertNotEqual(result.returncode, 0)
-                    self.assertEqual(result.stdout, "")
+        job = block(WORKFLOW, "  validate:")
+        install = block(job, "      - name: Install test dependencies")
+        tests = block(job, "      - name: Run standard unit tests")
+        self.assertIn("sudo apt-get update && sudo apt-get install -y python3-yaml", install)
+        self.assertIn('cargo install --locked --version 1.57.0 just --root "$RUNNER_TEMP/just"', install)
+        self.assertIn('echo "$RUNNER_TEMP/just/bin" >> "$GITHUB_PATH"', install)
+        self.assertIn("command -v just", tests)
+        self.assertIn("/usr/bin/python3 -c 'import yaml'", tests)
+        self.assertIn("/usr/bin/python3 -m unittest discover -s tests -v", tests)
+        self.assertNotIn(" -p ", tests)
+        self.assertNotIn("continue-on-error", job)
+        self.assertLess(job.index(install), job.index(tests))
+        self.assertNotIn("BACKUP_REAL_CONTAINER", job)
+        self.assertNotIn("NIRI_TEST_IMAGE", job)
 
     def test_shell_syntax(self):
-        scripts = re.findall(r"^        run: \|\n((?:          .*\n|\n)+)", WORKFLOW + TESTING, re.M)
+        scripts = re.findall(r"^        run: \|\n((?:          .*\n|\n)+)", WORKFLOW, re.M)
         self.assertGreaterEqual(len(scripts), 5)
-        scripts.append(FEDORA_ASSEMBLY)
         for shell in scripts:
             with self.subTest(script=shell.splitlines()[0]):
                 result = subprocess.run(["bash", "-n"], input=textwrap.dedent(shell), text=True, capture_output=True)

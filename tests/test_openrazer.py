@@ -89,7 +89,7 @@ class OpenRazerTests(unittest.TestCase):
                 self.assertEqual(config["niri-polychromatic"]["gpgcheck"], "1")
 
     def test_other_variants_do_nothing_even_without_inherited_packages(self):
-        for variant in ("bluefin-niri", "fedora-niri", "", "unknown"):
+        for variant in ("bluefin-niri", "", "unknown"):
             result, calls, repo = self.run_installer(variant, "missing-package")
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual((calls, repo), ("", ""))
@@ -114,7 +114,7 @@ class OpenRazerTests(unittest.TestCase):
 
     def test_shared_build_calls_guarded_installer(self):
         self.assertEqual(BUILD.count("\n    install_bazzite_openrazer\n"), 1)
-        shared = BUILD.split("install_ublue_niri_noctalia() {", 1)[1].split("install_mise()", 1)[0]
+        shared = BUILD.split("install_ublue_niri_noctalia() {", 1)[1].split('\ncase "${VARIANT}" in', 1)[0]
         self.assertIn("\n    install_bazzite_openrazer\n", shared)
 
 

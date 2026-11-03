@@ -174,45 +174,10 @@ storage-status:
     fi
     exit "$result"
 
-# Opt in to maintenance for existing ZFS storage on the Fedora candidate only
-[group('System')]
-[positional-arguments]
-configure-zfs name="default":
-    #!/usr/bin/bash
-    set -euo pipefail
-    if [[ ! -f /usr/libexec/fedora-zfs ]]; then
-        echo "Error: configure-zfs is Fedora-only; this image does not provide /usr/libexec/fedora-zfs." >&2
-        exit 1
-    fi
-    exec sudo python3 -I /usr/libexec/fedora-zfs enroll "$1"
-
 # Schedule checks of one existing md array, without provisioning storage
 [group('System')]
 setup-raid-maintenance:
     sudo python3 -I /usr/bin/setup-raid-maintenance
-
-# Enroll selected existing ZFS mount/import/unlock behavior on Fedora only
-[group('System')]
-[positional-arguments]
-zfs-storage-enroll name:
-    #!/usr/bin/bash
-    set -euo pipefail
-    if [[ ! -f /usr/libexec/fedora-zfs-storage ]]; then
-        echo "Error: zfs-storage-enroll is Fedora-only; /usr/libexec/fedora-zfs-storage is absent." >&2
-        exit 1
-    fi
-    exec sudo python3 -I /usr/libexec/fedora-zfs-storage enroll "$1"
-
-# Inspect existing ZFS storage without importing, unlocking or mounting
-[group('System')]
-zfs-storage-status:
-    #!/usr/bin/bash
-    set -euo pipefail
-    if [[ ! -f /usr/libexec/fedora-zfs-storage ]]; then
-        echo "Error: zfs-storage-status is Fedora-only; /usr/libexec/fedora-zfs-storage is absent." >&2
-        exit 1
-    fi
-    exec python3 -I /usr/libexec/fedora-zfs-storage status
 
 # Compatibility entry point for generalized opt-in backup enrollment
 [group('System')]

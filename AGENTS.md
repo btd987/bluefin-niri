@@ -12,23 +12,9 @@
 ## Images
 
 - Keep `bluefin-niri`, `bazzite-niri`, and `bazzite-niri-nvidia` maintained.
-- The Fedora image/package name is `fedora-niri`.
+- `fedora-niri` is retired; its standalone build, publication, and support files have been removed.
 - `bluefin-niri-nvidia` and `fedora-44-niri` are retired. Exclude them from build, publish, and cleanup matrices; their GHCR packages were deleted.
 - Preserve existing Bluefin/Bazzite base mappings, `stable`/`stable-daily` channels, schedules, and retention.
-
-## Fedora Builds
-
-- This is a test project. Unsigned RPMs, unsigned ZFS modules, and publication to `ghcr.io/btd987/fedora-niri` are authorized for hardware testing with Secure Boot disabled.
-- Do not require production signing keys, generated test keys, a protected GitHub environment, or additional reviewers for this path.
-- Use this repository's GitHub Actions and GHCR process with `GITHUB_TOKEN` and narrowly scoped package-write permissions. Publish only from trusted `main` runs, never pull requests.
-- Build every dependency image and package on the same runner; never depend on developer-local artifacts.
-- Use `testing` and dated testing tags for Fedora. Do not promote it to stable or imply production readiness without an explicit decision and supporting evidence.
-- Keep source checksum/signature verification, exact-kernel ZFS checks, dependency validation, runtime artifact allowlists, tests, and container validation.
-- Allow unsigned local RPMs only in an explicit test-build mode for packages produced by the trusted build. Keep Fedora repository signature checks enabled; never silently fall back from signed verification.
-- Never include private keys or credentials in images, artifacts, logs, or Git. Do not claim Secure Boot support or require temporary certificate enrollment for unsigned builds.
-- Record actual build and test results separately from operator-performed hardware acceptance; production acceptance is not required before test publication. Never add a flag falsely asserting tests passed.
-- Keep the unsigned-testing workflow and build paths operative, with `.github/workflows/fedora-testing.yml` displayed as `Fedora Niri Testing`, not the retired `fedora-candidate.yml`. Keep tests and README aligned; editing this document alone does not enable publication.
-- Fedora dependency Containerfiles default `FEDORA_BASE` to `quay.io/fedora/fedora-bootc:44`. CI resolves that tag once per run to a validated digest reference, passes the same reference to every Fedora dependency build, and records it in build summaries and Nirius provenance. Do not permanently pin the base digest in the repository.
 
 ## Desktop and Custom Features
 
@@ -38,7 +24,7 @@
 - Image defaults belong in `/etc/niri/config.kdl`, with exactly one `spawn-at-startup "noctalia"`.
 - Native `noctalia msg` bindings: launcher `Mod+Space`, control center `Mod+S`, settings `Mod+Comma`, lock `Mod+Alt+L`, plus audio and brightness keys. See README for commands.
 - Never replace existing user configs automatically. Document backup-first targeted edits, preserve customizations, remove obsolete DMS/Quickshell startup references, and avoid duplicate shell starts. Prefer disabling `dms.service` before an update removes it.
-- Preserve non-shell packages, custom recipes, kanshi, and existing Bluefin/Bazzite ThinkPad fan defaults. Fedora keeps Thinkfan inactive until appropriate setup.
+- Preserve non-shell packages, custom recipes, kanshi, and existing Bluefin/Bazzite ThinkPad fan defaults.
 - Preserve each existing image's display manager; do not assume Bazzite uses GDM.
 
 ## Build Commands

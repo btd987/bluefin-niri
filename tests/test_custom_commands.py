@@ -26,9 +26,7 @@ class CustomCommandTests(unittest.TestCase):
         self.log = self.directory / "calls.jsonl"
         self.justfile = self.directory / "justfile"
         self.text = (ROOT / "system_files/usr/share/niri-system/justfile").read_text()
-        # Relocate only the existence probe/helper path; never install a host helper.
-        self.helper = self.directory / "fedora-zfs"
-        self.justfile.write_text(self.text.replace("/usr/libexec/fedora-zfs", str(self.helper)))
+        self.justfile.write_text(self.text)
         self.env = {k: v for k, v in os.environ.items() if not k.startswith("JUST_")}
         self.env.update(PATH=str(self.bin), CALL_LOG=str(self.log), TMPDIR=str(self.directory))
         for command in ("sudo", "lsblk", "findmnt"):
@@ -91,51 +89,15 @@ class CustomCommandTests(unittest.TestCase):
                                        ["zpool", "status"],
                                        ["zfs", "list", "-o", "name,type,used,available,mountpoint"]])
 
-    def test_zfs_missing_is_clear_and_does_not_elevate(self):
-        result = self.run_recipe("configure-zfs")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("Fedora-only", result.stderr)
-        self.assertEqual(self.calls(), [])
-
-    def test_zfs_isolated_python_and_literal_name(self):
-        self.helper.touch()
-        for args, name in (((), "default"), (("data-snapshots",), "data-snapshots"),
-                           (("$(touch INJECTED)",), "$(touch INJECTED)")):
-            result = self.run_recipe("configure-zfs", *args)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(self.calls()[-1], ["sudo", "python3", "-I", str(self.helper), "enroll", name])
-            self.assertFalse((self.directory / "INJECTED").exists())
-
     def test_privileged_command_failure_propagates(self):
         self.stub("sudo", 23)
-        self.helper.touch()
-        for args in (("setup-backup",), ("backup-status", "home"), ("configure-zfs",)):
+        for args in (("setup-backup",), ("backup-status", "home")):
             self.assertEqual(self.run_recipe(*args).returncode, 23)
 
     def test_raid_uses_isolated_python(self):
         result = self.run_recipe('setup-raid-maintenance')
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.calls(), [['sudo', 'python3', '-I', '/usr/bin/setup-raid-maintenance']])
-
-    def test_storage_helper_missing_and_literal_enrollment(self):
-        for args in (('zfs-storage-enroll', 'data'), ('zfs-storage-status',)):
-            result = self.run_recipe(*args)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn('Fedora-only', result.stderr)
-            self.assertEqual(self.calls(), [])
-        helper = Path(str(self.helper) + '-storage')
-        helper.touch()
-        for name in ('data', 'two words', '$(touch INJECTED)', "'\"; touch INJECTED; #"):
-            result = self.run_recipe('zfs-storage-enroll', name)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(self.calls()[-1], ['sudo', 'python3', '-I', str(helper), 'enroll', name])
-            self.assertFalse((self.directory / 'INJECTED').exists())
-        self.stub('python3')
-        result = self.run_recipe('zfs-storage-status')
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.calls()[-1], ['python3', '-I', str(helper), 'status'])
-        self.stub('python3', 23)
-        self.assertEqual(self.run_recipe('zfs-storage-status').returncode, 23)
 
 
 if __name__ == "__main__":
