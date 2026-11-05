@@ -19,11 +19,11 @@
 ## Desktop and Custom Features
 
 - Stage `system_files/` at `/tmp/system_files` for installation by `build.sh`.
-- Use native Fedora `noctalia` v5, not `noctalia-shell`, Quickshell, or the retired Terra setup.
-- Upstream: https://github.com/noctalia-dev/noctalia and https://docs.noctalia.dev/noctalia/.
-- Image defaults belong in `/etc/niri/config.kdl`, with exactly one `spawn-at-startup "noctalia"`.
-- Native `noctalia msg` bindings: launcher `Mod+Space`, control center `Mod+S`, settings `Mod+Comma`, lock `Mod+Alt+L`, plus audio and brightness keys. See README for commands.
-- Never replace existing user configs automatically. Document backup-first targeted edits, preserve customizations, remove obsolete DMS/Quickshell startup references, and avoid duplicate shell starts. Prefer disabling `dms.service` before an update removes it.
+- Use stable DMS (`dms` and `dms-cli`) from the isolated `duxlabs/dms` COPR with Fedora Quickshell and matugen.
+- Upstream: https://github.com/duxlabs-dev/dux-shell and https://danklinux.com/docs/dms/ (formerly DankMaterialShell, now Dux Modular Shell).
+- Image defaults belong in `/etc/niri/config.kdl`, with exactly one `spawn-at-startup "dms" "run"`; keep the `dms.service` preset disabled.
+- `dms ipc call` bindings: launcher `Mod+Space`, control center `Mod+S`, settings `Mod+Comma`, lock `Mod+Alt+L`, plus audio and brightness keys. See README for commands.
+- Never replace existing user configs automatically. Document backup-first targeted edits, preserve customizations, remove obsolete Noctalia startup references and rules, and avoid duplicate shell starts. Disable competing user services/autostart before switching to Niri-managed DMS startup.
 - Preserve non-shell packages, custom recipes, kanshi, and existing Bluefin/Bazzite ThinkPad fan defaults.
 - Preserve each existing image's display manager; do not assume Bazzite uses GDM.
 

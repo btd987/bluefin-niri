@@ -1,6 +1,6 @@
 # Bluefin Niri
 
-Fedora Atomic desktops with [Niri](https://github.com/YaLTeR/niri) and native [Noctalia v5](https://github.com/noctalia-dev/noctalia). See the [Noctalia documentation](https://docs.noctalia.dev/noctalia/).
+Fedora Atomic desktops with [Niri](https://github.com/YaLTeR/niri) and [DMS](https://github.com/duxlabs-dev/dux-shell) (formerly DankMaterialShell, now Dux Modular Shell). See the [DMS documentation](https://danklinux.com/docs/dms/).
 
 ## Images
 
@@ -31,28 +31,29 @@ Switching images does not migrate user configurations or storage. OS rollback do
 
 ## Desktop and Migration
 
-Images include native `noctalia` (not `noctalia-shell` or Quickshell), xwayland-satellite, Kitty, Ghostty, kanshi, gamescope, khal and shared custom recipes. Ghostty comes from the community `scottames/ghostty` COPR listed in its [installation documentation](https://ghostty.org/docs/install/binary#fedora); launch it from the application launcher or run `ghostty`. Kitty remains the default `Mod+T` terminal. Defaults live in `/etc/niri/config.kdl`; existing user configs are never replaced automatically.
+Images include stable `dms` and `dms-cli` from the upstream `duxlabs/dms` COPR, Fedora Quickshell and matugen, xwayland-satellite, Kitty, Ghostty, kanshi, gamescope, khal and shared custom recipes. Ghostty comes from the community `scottames/ghostty` COPR listed in its [installation documentation](https://ghostty.org/docs/install/binary#fedora); launch it from the application launcher or run `ghostty`. Kitty remains the default `Mod+T` terminal. Defaults live in `/etc/niri/config.kdl`; existing user configs are never replaced automatically.
 
 Bazzite builds refresh the signed upstream `uupd` package to at least 1.5.0 for corrected update-failure reporting. The inherited `ujust upgrade` service/logging path remains unchanged; this package upgrade alone does not restore its terminal progress bar.
 
 1. Back up `${XDG_CONFIG_HOME:-$HOME/.config}/niri`, any custom `NIRI_CONFIG`, and all external included files before editing. Preserve rules, outputs, inputs, shortcuts and appearance; do not replace entire configs or apply unrelated dotfiles.
-2. Preferably before updating, keep a terminal open and run `systemctl --user disable --now dms.service`. If the unit is already removed, inspect user units and autostart entries for obsolete DMS activation; preserve its settings for rollback.
-3. Compare the active config with `/etc/niri/config.kdl` and make targeted edits. Remove obsolete DMS and `qs`/`quickshell -c noctalia-shell` startup references, including includes/scripts. Retain legacy settings for reference; v5 does not migrate v4 settings.
-4. Keep exactly one `spawn-at-startup "noctalia"` in the active Niri config, with no competing user service or desktop autostart. Merge these native bindings into the existing `binds` block, replacing conflicts rather than duplicating them:
+2. Preferably before updating, keep a terminal open and disable any Noctalia user service or desktop autostart you previously configured. Inspect `systemctl --user list-unit-files` and your autostart entries to identify it; preserve Noctalia settings for rollback. If returning from an older DMS installation, run `systemctl --user disable --now dms.service` when that unit exists to remove competing service activation.
+3. Compare the active config with `/etc/niri/config.kdl` and make targeted edits. Remove Noctalia and `qs`/`quickshell -c noctalia-shell` startup references, including includes/scripts, and obsolete Noctalia-specific window/layer rules. Preserve customizations and old settings; they are not automatically converted to DMS. Avoid `dms setup` when migrating a customized config; merge the changes below instead.
+4. Keep exactly one `spawn-at-startup "dms" "run"` in the active Niri config, with no competing user service or desktop autostart. The image disables the `dms.service` preset because Niri starts DMS directly. Merge these bindings into the existing `binds` block, replacing conflicts rather than duplicating them (also replace any old `Mod+D` launcher binding):
 
 ```kdl
-Mod+Space { spawn "noctalia" "msg" "panel-toggle" "launcher"; }
-Mod+S { spawn "noctalia" "msg" "panel-toggle" "control-center"; }
-Mod+Comma { spawn "noctalia" "msg" "settings-toggle"; }
-Mod+Alt+L { spawn "noctalia" "msg" "session" "lock"; }
-XF86AudioRaiseVolume { spawn "noctalia" "msg" "volume-up"; }
-XF86AudioLowerVolume { spawn "noctalia" "msg" "volume-down"; }
-XF86AudioMute { spawn "noctalia" "msg" "volume-mute"; }
-XF86MonBrightnessUp { spawn "noctalia" "msg" "brightness-up"; }
-XF86MonBrightnessDown { spawn "noctalia" "msg" "brightness-down"; }
+Mod+Space { spawn "dms" "ipc" "call" "spotlight" "toggle"; }
+Mod+D { spawn "dms" "ipc" "call" "spotlight" "toggle"; }
+Mod+S { spawn "dms" "ipc" "call" "control-center" "toggle"; }
+Mod+Comma { spawn "dms" "ipc" "call" "settings" "toggle"; }
+Mod+Alt+L { spawn "dms" "ipc" "call" "lock" "lock"; }
+XF86AudioRaiseVolume allow-when-locked=true { spawn "dms" "ipc" "call" "audio" "increment" "5"; }
+XF86AudioLowerVolume allow-when-locked=true { spawn "dms" "ipc" "call" "audio" "decrement" "5"; }
+XF86AudioMute allow-when-locked=true { spawn "dms" "ipc" "call" "audio" "mute"; }
+XF86MonBrightnessUp allow-when-locked=true { spawn "dms" "ipc" "call" "brightness" "increment" "10"; }
+XF86MonBrightnessDown allow-when-locked=true { spawn "dms" "ipc" "call" "brightness" "decrement" "10"; }
 ```
 
-5. Run `niri validate` (use `--config` for a custom path), then log out and back in; reload alone does not rerun startup commands. Check `rpm -q noctalia`, `noctalia msg status`, and test panels, lock/password unlock, audio and brightness.
+5. Run `niri validate` (use `--config` for a custom path), then log out and back in; reload alone does not rerun startup commands. Check `rpm -q dms dms-cli quickshell`, `dms version`, `dms ipc list`, and test panels, lock/password unlock, audio and brightness.
 
 ## Razer Devices (Bazzite)
 

@@ -10,7 +10,7 @@ import unittest
 
 BUILD = (Path(__file__).resolve().parents[1] / "build.sh").read_text()
 FUNCTION = re.search(
-    r"^configure_niri_noctalia\(\) \{\n.*?^\}(?=\n\n\w+\(\))", BUILD, re.M | re.S
+    r"^configure_niri_dms\(\) \{\n.*?^\}(?=\n\n\w+\(\))", BUILD, re.M | re.S
 ).group()
 # Unmodified relevant lines from niri-26.04-1.fc44 default-config.kdl.
 UPSTREAM = '''spawn-at-startup "waybar"
@@ -26,8 +26,8 @@ binds {
     XF86MonBrightnessDown allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "10%-"; }
 }
 '''
-LAUNCHER = '    Mod+Space { spawn "noctalia" "msg" "panel-toggle" "launcher"; }'
-OBSOLETE = ("waybar", "fuzzel", "swaylock", "alacritty", "dms", "qs", "quickshell")
+LAUNCHER = '    Mod+Space { spawn "dms" "ipc" "call" "spotlight" "toggle"; }'
+OBSOLETE = ("waybar", "fuzzel", "swaylock", "alacritty", "noctalia", "noctalia-shell", "qs", "quickshell")
 
 
 class NiriTests(unittest.TestCase):
@@ -62,7 +62,7 @@ niri() {
     fi
     printf 'validated\n'
 }
-''' + function + "\nconfigure_niri_noctalia\n"],
+''' + function + "\nconfigure_niri_dms\n"],
                 env=dict(os.environ, TEST_ROOT=directory, NIRI_TEST_IMAGE=self.image),
                 capture_output=True, text=True,
             )
@@ -74,12 +74,14 @@ niri() {
         result, config = self.configure(self.upstream)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("validated", result.stdout)
-        self.assertEqual(config.splitlines().count('spawn-at-startup "noctalia"'), 1)
+        self.assertEqual(config.splitlines().count('spawn-at-startup "dms" "run"'), 1)
         self.assertEqual(config.splitlines().count(LAUNCHER), 1)
-        for command in ("launcher", "control-center", "settings-toggle", "lock",
-                        "volume-up", "volume-down", "volume-mute",
-                        "brightness-up", "brightness-down"):
-            self.assertIn(f'"{command}";', config)
+        for command in ('"spotlight" "toggle"', '"control-center" "toggle"',
+                        '"settings" "toggle"', '"lock" "lock"',
+                        '"audio" "increment" "5"', '"audio" "decrement" "5"',
+                        '"audio" "mute"', '"brightness" "increment" "10"',
+                        '"brightness" "decrement" "10"'):
+            self.assertIn(f'"dms" "ipc" "call" {command};', config)
 
     def test_mod_d_whitespace_drift_despite_valid_mod_space(self):
         source = self.upstream.replace("Mod+D hotkey", "Mod+D  hotkey")
@@ -91,9 +93,9 @@ niri() {
         self.assertNotIn("validated", result.stdout)
 
     def test_duplicate_startup(self):
-        result, _ = self.configure(self.upstream + 'spawn-at-startup "noctalia"\n')
+        result, _ = self.configure(self.upstream + 'spawn-at-startup "dms" "run"\n')
         self.assertEqual(result.returncode, 1)
-        self.assertIn('Missing or duplicated Niri default: spawn-at-startup "noctalia"', result.stderr)
+        self.assertIn('Missing or duplicated Niri default: spawn-at-startup "dms" "run"', result.stderr)
         self.assertNotIn("validated", result.stdout)
 
     def test_obsolete_extra_startups_and_bindings(self):
@@ -111,7 +113,7 @@ niri() {
                     self.assertNotIn("validated", result.stdout)
 
     def test_comments_ignored(self):
-        source = self.upstream + '\n// spawn-at-startup "noctalia"\n'
+        source = self.upstream + '\n// spawn-at-startup "dms" "run"\n'
         for command in OBSOLETE:
             source += f'    // spawn-sh-at-startup "{command} --old"\n'
             source = source.replace(
@@ -122,19 +124,19 @@ niri() {
         self.assertIn("validated", result.stdout)
 
     def test_indented_duplicate_startup_rejected(self):
-        result, _ = self.configure(self.upstream + '    spawn-at-startup "noctalia"\n')
+        result, _ = self.configure(self.upstream + '    spawn-at-startup "dms" "run"\n')
         self.assertEqual(result.returncode, 1)
 
     def test_multiline_obsolete_binding_rejected(self):
         source = self.upstream.replace(
-            "binds {", 'binds {\n    Mod+F12 {\n        spawn "dms";\n    }', 1
+            "binds {", 'binds {\n    Mod+F12 {\n        spawn "noctalia";\n    }', 1
         )
         result, _ = self.configure(source)
         self.assertEqual(result.returncode, 1)
 
     def test_unfamiliar_block_comment_fails_closed(self):
         # These build-time checks deliberately do not implement a KDL parser.
-        result, _ = self.configure(self.upstream + '\n/*\nspawn-at-startup "dms"\n*/\n')
+        result, _ = self.configure(self.upstream + '\n/*\nspawn-at-startup "noctalia"\n*/\n')
         self.assertEqual(result.returncode, 1)
         self.assertIn("Obsolete shell command in Niri defaults", result.stderr)
 

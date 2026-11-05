@@ -1,4 +1,4 @@
-# Niri compositor and native Noctalia shell recipes
+# Niri compositor and DMS shell recipes
 
 # Switch to Niri session
 [group('Desktop')]
@@ -15,7 +15,7 @@ niri-reload:
 niri-version:
     @niri --version
     @echo ""
-    @rpm -q noctalia || echo "Noctalia not installed"
+    @rpm -q dms dms-cli quickshell || echo "DMS or its dependencies not installed"
 
 # Install Podman Desktop system-wide with native Flatpak confirmation
 [group('Desktop')]

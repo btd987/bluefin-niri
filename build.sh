@@ -34,6 +34,11 @@ copr_install_isolated() {
 
     dnf5 -y copr enable "$copr_name"
     dnf5 -y copr disable "$copr_name"
+    if [[ "$copr_name" == duxlabs/dms ]]; then
+        # The upstream repo file also enables a broad companion repository.
+        # Quickshell and matugen come from Fedora instead.
+        dnf5 config-manager setopt coprdep:copr.fedorainfracloud.org:duxlabs:dux-repo.enabled=0
+    fi
     dnf5 config-manager setopt "${repo_id}.includepkgs=${include_packages}"
     dnf5 -y install --enablerepo="$repo_id" "${packages[@]}"
 
@@ -121,72 +126,54 @@ configure_os_release() {
     echo "BUILD_ID=\"${build_date}\"" >> "$os_release"
 }
 
-configure_niri_noctalia() {
+configure_niri_dms() {
     mkdir -p /etc/niri
     install -Dm0644 /usr/share/doc/niri/default-config.kdl /etc/niri/config.kdl
 
-    # Noctalia is started by Niri, which is the upstream-recommended method.
-    sed -i 's|^spawn-at-startup "waybar"$|spawn-at-startup "noctalia"|' /etc/niri/config.kdl
-    sed -i 's|This line starts waybar, a commonly used bar for Wayland compositors.|This line starts the native Noctalia desktop shell.|' /etc/niri/config.kdl
+    # Start DMS only in Niri; do not also enable its user service.
+    sed -i 's|^spawn-at-startup "waybar"$|spawn-at-startup "dms" "run"|' /etc/niri/config.kdl
+    sed -i 's|This line starts waybar, a commonly used bar for Wayland compositors.|This line starts the DMS desktop shell.|' /etc/niri/config.kdl
     sed -i 's|Mod+T hotkey-overlay-title="Open a Terminal: alacritty" { spawn "alacritty"; }|Mod+T hotkey-overlay-title="Open a Terminal: kitty" { spawn "kitty"; }|' /etc/niri/config.kdl
 
     sed -i '/^binds {/a\
-    Mod+Space { spawn "noctalia" "msg" "panel-toggle" "launcher"; }\
-    Mod+S { spawn "noctalia" "msg" "panel-toggle" "control-center"; }
+    Mod+Space { spawn "dms" "ipc" "call" "spotlight" "toggle"; }\
+    Mod+S { spawn "dms" "ipc" "call" "control-center" "toggle"; }
 ' /etc/niri/config.kdl
-    sed -i 's|Mod+D hotkey-overlay-title="Run an Application: fuzzel" { spawn "fuzzel"; }|Mod+D hotkey-overlay-title="Run an Application: Noctalia" { spawn "noctalia" "msg" "panel-toggle" "launcher"; }|' /etc/niri/config.kdl
-    sed -i 's|Super+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }|Mod+Alt+L hotkey-overlay-title="Lock the Screen: Noctalia" { spawn "noctalia" "msg" "session" "lock"; }|' /etc/niri/config.kdl
-    sed -i 's|Mod+Comma  { consume-window-into-column; }|Mod+Comma { spawn "noctalia" "msg" "settings-toggle"; }|' /etc/niri/config.kdl
-    sed -i 's|XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+ -l 1.0"; }|XF86AudioRaiseVolume allow-when-locked=true { spawn "noctalia" "msg" "volume-up"; }|' /etc/niri/config.kdl
-    sed -i 's|XF86AudioLowerVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1-"; }|XF86AudioLowerVolume allow-when-locked=true { spawn "noctalia" "msg" "volume-down"; }|' /etc/niri/config.kdl
-    sed -i 's|XF86AudioMute        allow-when-locked=true { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"; }|XF86AudioMute        allow-when-locked=true { spawn "noctalia" "msg" "volume-mute"; }|' /etc/niri/config.kdl
-    sed -i 's|XF86MonBrightnessUp allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "+10%"; }|XF86MonBrightnessUp allow-when-locked=true { spawn "noctalia" "msg" "brightness-up"; }|' /etc/niri/config.kdl
-    sed -i 's|XF86MonBrightnessDown allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "10%-"; }|XF86MonBrightnessDown allow-when-locked=true { spawn "noctalia" "msg" "brightness-down"; }|' /etc/niri/config.kdl
-
-    cat >> /etc/niri/config.kdl << 'EOF'
-
-// Noctalia integration.
-window-rule {
-    match app-id=r#"^dev\.noctalia\.Noctalia$"#
-    open-floating true
-}
-
-debug {
-    honor-xdg-activation-with-invalid-serial
-}
-
-layer-rule {
-    match namespace="^noctalia-backdrop"
-    place-within-backdrop true
-}
-EOF
+    sed -i 's|Mod+D hotkey-overlay-title="Run an Application: fuzzel" { spawn "fuzzel"; }|Mod+D hotkey-overlay-title="Run an Application: DMS" { spawn "dms" "ipc" "call" "spotlight" "toggle"; }|' /etc/niri/config.kdl
+    sed -i 's|Super+Alt+L hotkey-overlay-title="Lock the Screen: swaylock" { spawn "swaylock"; }|Mod+Alt+L hotkey-overlay-title="Lock the Screen: DMS" { spawn "dms" "ipc" "call" "lock" "lock"; }|' /etc/niri/config.kdl
+    sed -i 's|Mod+Comma  { consume-window-into-column; }|Mod+Comma { spawn "dms" "ipc" "call" "settings" "toggle"; }|' /etc/niri/config.kdl
+    sed -i 's|XF86AudioRaiseVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1+ -l 1.0"; }|XF86AudioRaiseVolume allow-when-locked=true { spawn "dms" "ipc" "call" "audio" "increment" "5"; }|' /etc/niri/config.kdl
+    sed -i 's|XF86AudioLowerVolume allow-when-locked=true { spawn-sh "wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.1-"; }|XF86AudioLowerVolume allow-when-locked=true { spawn "dms" "ipc" "call" "audio" "decrement" "5"; }|' /etc/niri/config.kdl
+    sed -i 's|XF86AudioMute        allow-when-locked=true { spawn-sh "wpctl set-mute @DEFAULT_AUDIO_SINK@ toggle"; }|XF86AudioMute        allow-when-locked=true { spawn "dms" "ipc" "call" "audio" "mute"; }|' /etc/niri/config.kdl
+    sed -i 's|XF86MonBrightnessUp allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "+10%"; }|XF86MonBrightnessUp allow-when-locked=true { spawn "dms" "ipc" "call" "brightness" "increment" "10"; }|' /etc/niri/config.kdl
+    sed -i 's|XF86MonBrightnessDown allow-when-locked=true { spawn "brightnessctl" "--class=backlight" "set" "10%-"; }|XF86MonBrightnessDown allow-when-locked=true { spawn "dms" "ipc" "call" "brightness" "decrement" "10"; }|' /etc/niri/config.kdl
 
     # Fail rather than silently shipping incomplete integration if Niri defaults change.
     local expected
     for expected in \
-        'spawn-at-startup "noctalia"' \
+        'spawn-at-startup "dms" "run"' \
         '    Mod+T hotkey-overlay-title="Open a Terminal: kitty" { spawn "kitty"; }' \
-        '    Mod+Space { spawn "noctalia" "msg" "panel-toggle" "launcher"; }' \
-        '    Mod+D hotkey-overlay-title="Run an Application: Noctalia" { spawn "noctalia" "msg" "panel-toggle" "launcher"; }' \
-        '    Mod+S { spawn "noctalia" "msg" "panel-toggle" "control-center"; }' \
-        '    Mod+Comma { spawn "noctalia" "msg" "settings-toggle"; }' \
-        '    Mod+Alt+L hotkey-overlay-title="Lock the Screen: Noctalia" { spawn "noctalia" "msg" "session" "lock"; }' \
-        '    XF86AudioRaiseVolume allow-when-locked=true { spawn "noctalia" "msg" "volume-up"; }' \
-        '    XF86AudioLowerVolume allow-when-locked=true { spawn "noctalia" "msg" "volume-down"; }' \
-        '    XF86AudioMute        allow-when-locked=true { spawn "noctalia" "msg" "volume-mute"; }' \
-        '    XF86MonBrightnessUp allow-when-locked=true { spawn "noctalia" "msg" "brightness-up"; }' \
-        '    XF86MonBrightnessDown allow-when-locked=true { spawn "noctalia" "msg" "brightness-down"; }'; do
+        '    Mod+Space { spawn "dms" "ipc" "call" "spotlight" "toggle"; }' \
+        '    Mod+D hotkey-overlay-title="Run an Application: DMS" { spawn "dms" "ipc" "call" "spotlight" "toggle"; }' \
+        '    Mod+S { spawn "dms" "ipc" "call" "control-center" "toggle"; }' \
+        '    Mod+Comma { spawn "dms" "ipc" "call" "settings" "toggle"; }' \
+        '    Mod+Alt+L hotkey-overlay-title="Lock the Screen: DMS" { spawn "dms" "ipc" "call" "lock" "lock"; }' \
+        '    XF86AudioRaiseVolume allow-when-locked=true { spawn "dms" "ipc" "call" "audio" "increment" "5"; }' \
+        '    XF86AudioLowerVolume allow-when-locked=true { spawn "dms" "ipc" "call" "audio" "decrement" "5"; }' \
+        '    XF86AudioMute        allow-when-locked=true { spawn "dms" "ipc" "call" "audio" "mute"; }' \
+        '    XF86MonBrightnessUp allow-when-locked=true { spawn "dms" "ipc" "call" "brightness" "increment" "10"; }' \
+        '    XF86MonBrightnessDown allow-when-locked=true { spawn "dms" "ipc" "call" "brightness" "decrement" "10"; }'; do
         if [[ $(grep -Fxc "$expected" /etc/niri/config.kdl) -ne 1 ]]; then
             echo "Missing or duplicated Niri default: $expected" >&2
             return 1
         fi
     done
-    if [[ $(grep -Ec '^[[:space:]]*spawn-at-startup[[:space:]]+"noctalia"' /etc/niri/config.kdl) -ne 1 ]]; then
-        echo "Expected exactly one Noctalia startup in Niri defaults" >&2
+    if [[ $(grep -Ec '^[[:space:]]*spawn-at-startup[[:space:]]+"dms"' /etc/niri/config.kdl) -ne 1 ]]; then
+        echo "Expected exactly one DMS startup in Niri defaults" >&2
         return 1
     fi
     # Conservative line checks: unfamiliar upstream layouts require manual review.
-    if grep -E '^[[:space:]]*(spawn(-sh)?(-at-startup)?|[^/[:space:]][^{]*\{[[:space:]]*spawn(-sh)?)[[:space:]]+"(waybar|fuzzel|swaylock|alacritty|dms|qs|quickshell)("|[[:space:]])' /etc/niri/config.kdl; then
+    if grep -E '^[[:space:]]*(spawn(-sh)?(-at-startup)?|[^/[:space:]][^{]*\{[[:space:]]*spawn(-sh)?)[[:space:]]+"(waybar|fuzzel|swaylock|alacritty|noctalia|noctalia-shell|qs|quickshell)("|[[:space:]])' /etc/niri/config.kdl; then
         echo "Obsolete shell command in Niri defaults" >&2
         return 1
     fi
@@ -260,8 +247,8 @@ EOF
     # Niri startup command or system-wide daemon is needed.
 )
 
-install_ublue_niri_noctalia() {
-    echo "Installing Niri compositor + native Noctalia shell..."
+install_ublue_niri_dms() {
+    echo "Installing Niri compositor + DMS shell..."
 
     install_staged_system_files
 
@@ -290,8 +277,9 @@ install_ublue_niri_noctalia() {
             ;;
     esac
 
-    # Native v5 comes from Fedora, not the legacy Quickshell/Terra packages.
-    dnf5 install -y --repo=fedora --repo=updates 'noctalia >= 5.0.0'
+    # Stable DMS and its split CLI package from the upstream COPR.
+    dnf5 install -y --repo=fedora --repo=updates quickshell matugen
+    copr_install_isolated duxlabs/dms dms dms-cli
 
     install_vpn_packages
 
@@ -366,7 +354,7 @@ install_ublue_niri_noctalia() {
     # Set zsh as default shell for new users
     sed -i 's|SHELL=/bin/bash|SHELL=/bin/zsh|' /etc/default/useradd
 
-    # Enable kanshi via systemd preset; Noctalia starts only through Niri.
+    # Enable kanshi via systemd preset; DMS starts only through Niri.
     # Disable xwaylandvideobridge (Bazzite ships it for KDE, but it creates a visible
     # white window on Niri since Niri handles screen sharing via portals natively)
     install -Dm0644 /tmp/system_files/usr/share/niri-system/defaults/80-bluefin-niri.preset /usr/lib/systemd/user-preset/80-bluefin-niri.preset
@@ -378,12 +366,12 @@ install_ublue_niri_noctalia() {
     # Uses GNOME portal (works well with Niri) + GTK fallback
     install -Dm0644 /tmp/system_files/usr/share/niri-system/defaults/niri-portals.conf /usr/share/xdg-desktop-portal/niri-portals.conf
 
-    configure_niri_noctalia
+    configure_niri_dms
     # Set Niri as default session for new users via AccountsService template.
     install -Dm0644 /tmp/system_files/usr/share/niri-system/defaults/standard-user /usr/share/accountsservice/user-templates/standard
 
-    rpm -q noctalia
-    noctalia --version
+    rpm -q dms dms-cli quickshell
+    runuser -u nobody -- dms version
 
     if [[ "${VARIANT}" == *"nvidia"* ]]; then
         configure_os_release "Niri NVIDIA" "niri-nvidia"
@@ -391,12 +379,12 @@ install_ublue_niri_noctalia() {
         configure_os_release "Niri" "niri"
     fi
 
-    echo "Niri + native Noctalia installation complete"
+    echo "Niri + DMS installation complete"
 }
 
 case "${VARIANT}" in
     ""|bluefin-niri|bazzite-niri|bazzite-niri-nvidia)
-        install_ublue_niri_noctalia
+        install_ublue_niri_dms
         ;;
     *)
         echo "Unsupported image variant: ${VARIANT}" >&2

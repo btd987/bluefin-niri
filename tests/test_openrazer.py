@@ -114,7 +114,7 @@ class OpenRazerTests(unittest.TestCase):
 
     def test_shared_build_calls_guarded_installer(self):
         self.assertEqual(BUILD.count("\n    install_bazzite_openrazer\n"), 1)
-        shared = BUILD.split("install_ublue_niri_noctalia() {", 1)[1].split('\ncase "${VARIANT}" in', 1)[0]
+        shared = BUILD.split("install_ublue_niri_dms() {", 1)[1].split('\ncase "${VARIANT}" in', 1)[0]
         self.assertIn("\n    install_bazzite_openrazer\n", shared)
 
 
