@@ -371,7 +371,8 @@ install_ublue_niri_dms() {
     install -Dm0644 /tmp/system_files/usr/share/niri-system/defaults/standard-user /usr/share/accountsservice/user-templates/standard
 
     rpm -q dms dms-cli quickshell
-    runuser -u nobody -- dms version
+    # DMS rejects root; drop privileges without opening a PAM session in CI.
+    setpriv --reuid=nobody --regid=nobody --clear-groups dms version
 
     if [[ "${VARIANT}" == *"nvidia"* ]]; then
         configure_os_release "Niri NVIDIA" "niri-nvidia"
