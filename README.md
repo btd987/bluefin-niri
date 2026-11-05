@@ -31,7 +31,7 @@ Switching images does not migrate user configurations or storage. OS rollback do
 
 ## Desktop and Migration
 
-Images include stable `dms` and `dms-cli` from the upstream `duxlabs/dms` COPR, Fedora Quickshell and matugen, xwayland-satellite, Kitty, Ghostty, kanshi, gamescope, khal and shared custom recipes. Ghostty comes from the community `scottames/ghostty` COPR listed in its [installation documentation](https://ghostty.org/docs/install/binary#fedora); launch it from the application launcher or run `ghostty`. Kitty remains the default `Mod+T` terminal. Defaults live in `/etc/niri/config.kdl`; existing user configs are never replaced automatically.
+Images include stable `dms` and `dms-cli` from the upstream `duxlabs/dms` COPR, Quickshell >= 0.3.2 and cpptrace from the scoped `duxlabs/dux-repo` COPR, Fedora matugen, xwayland-satellite, Kitty, Ghostty, kanshi, gamescope, khal and shared custom recipes. Fedora's older Quickshell 0.2 cannot load DMS 2.1's UI. Ghostty comes from the community `scottames/ghostty` COPR listed in its [installation documentation](https://ghostty.org/docs/install/binary#fedora); launch it from the application launcher or run `ghostty`. Kitty remains the default `Mod+T` terminal. Defaults live in `/etc/niri/config.kdl`; existing user configs are never replaced automatically.
 
 Bazzite builds refresh the signed upstream `uupd` package to at least 1.5.0 for corrected update-failure reporting. The inherited `ujust upgrade` service/logging path remains unchanged; this package upgrade alone does not restore its terminal progress bar.
 

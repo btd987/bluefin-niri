@@ -19,7 +19,7 @@
 ## Desktop and Custom Features
 
 - Stage `system_files/` at `/tmp/system_files` for installation by `build.sh`.
-- Use stable DMS (`dms` and `dms-cli`) from the isolated `duxlabs/dms` COPR with Fedora Quickshell and matugen.
+- Use stable DMS (`dms` and `dms-cli`) from the isolated `duxlabs/dms` COPR, Quickshell >= 0.3.2 and cpptrace from the isolated `duxlabs/dux-repo` COPR, and Fedora matugen.
 - Upstream: https://github.com/duxlabs-dev/dux-shell and https://danklinux.com/docs/dms/ (formerly DankMaterialShell, now Dux Modular Shell).
 - Image defaults belong in `/etc/niri/config.kdl`, with exactly one `spawn-at-startup "dms" "run"`; keep the `dms.service` preset disabled.
 - `dms ipc call` bindings: launcher `Mod+Space`, control center `Mod+S`, settings `Mod+Comma`, lock `Mod+Alt+L`, plus audio and brightness keys. See README for commands.

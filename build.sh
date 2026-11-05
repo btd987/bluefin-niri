@@ -36,7 +36,7 @@ copr_install_isolated() {
     dnf5 -y copr disable "$copr_name"
     if [[ "$copr_name" == duxlabs/dms ]]; then
         # The upstream repo file also enables a broad companion repository.
-        # Quickshell and matugen come from Fedora instead.
+        # Quickshell is installed separately from its scoped companion repo.
         dnf5 config-manager setopt coprdep:copr.fedorainfracloud.org:duxlabs:dux-repo.enabled=0
     fi
     dnf5 config-manager setopt "${repo_id}.includepkgs=${include_packages}"
@@ -278,7 +278,11 @@ install_ublue_niri_dms() {
     esac
 
     # Stable DMS and its split CLI package from the upstream COPR.
-    dnf5 install -y --repo=fedora --repo=updates quickshell matugen
+    dnf5 install -y --repo=fedora --repo=updates matugen
+    # DMS 2.1 uses AppId and other APIs missing from Fedora's Quickshell 0.2.
+    copr_install_isolated duxlabs/dux-repo quickshell cpptrace
+    dnf5 install -y --enablerepo=copr:copr.fedorainfracloud.org:duxlabs:dux-repo 'quickshell >= 0.3.2'
+    qs --version
     copr_install_isolated duxlabs/dms dms dms-cli
 
     install_vpn_packages
